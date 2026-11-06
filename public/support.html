@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Help &amp; Support - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+<style>
+  .thread { border-left: 3px solid var(--border); margin: 10px 0 0 4px; padding-left: 12px; display: grid; gap: 8px; font-size: .92rem; }
+  .thread .staff b { color: var(--primary-dark); }
+  .issue { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .issue:last-child { border-bottom: 0; }
+  .issue .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .issue p { white-space: pre-wrap; margin: 6px 0; overflow-wrap: anywhere; }
+  .st { font-size: .72rem; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #fdf3e3; color: #97650f; white-space: nowrap; }
+  .st.in_progress { background: #dcecf8; color: #1d4f7a; } .st.resolved { background: #e3f4ea; color: #14633c; }
+  .reply-form { display: flex; gap: 8px; margin-top: 10px; }
+  .reply-form input { margin: 0; } .reply-form button { width: auto; margin: 0; padding: 0 16px; }
+</style>
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="profile.html">Profile</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 640px;">
+    <div class="card">
+      <h1 style="margin-top:0;">Report a problem</h1>
+      <p class="subtitle">Something wrong with a court, a booking or a payment? Tell us and we'll reply here.</p>
+      <form id="issueForm">
+        <label for="cat">What is it about?</label>
+        <select id="cat">
+          <option value="court">A court or facility</option><option value="booking">A booking</option>
+          <option value="payment">A payment</option><option value="system">This website</option><option value="other">Something else</option>
+        </select>
+        <label for="subject">Short title</label>
+        <input id="subject" maxlength="120" placeholder="e.g. Net on Court 2 is torn" required />
+        <label for="message">What happened?</label>
+        <textarea id="message" rows="4" maxlength="2000" required></textarea>
+        <button type="submit" class="cta">Send report</button>
+        <div id="formMsg" class="msg"></div>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h1 style="margin-top:0;font-size:1.2rem;">My reports</h1>
+      <div id="list"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h1 style="margin-top:0;font-size:1.1rem;">Policies</h1>
+      <p class="subtitle"><a href="terms.html">Read the booking rules, cancellation and payment policy</a></p>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    const STATUS = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved' };
+    const when = (d) => new Date(d).toLocaleString('en-PH', { timeZone: 'Asia/Manila', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+
+    async function load() {
+      const el = document.getElementById('list');
+      try {
+        const { issues } = await apiRequest('/issues/mine', { auth: true });
+        el.innerHTML = issues.length ? issues.map((i) => `
+          <div class="issue" data-id="${esc(i._id)}">
+            <div class="top"><div><b>${esc(i.subject)}</b><div style="color:var(--muted);font-size:.82rem;">${esc(when(i.createdAt))}${i.booking ? ' · ' + esc(i.booking.referenceNumber) : ''}</div></div>
+              <span class="st ${esc(i.status)}">${esc(STATUS[i.status])}</span></div>
+            <p>${esc(i.message)}</p>
+            ${i.replies.length ? `<div class="thread">${i.replies.map((r) => `<div class="${r.byRole === 'user' ? '' : 'staff'}"><b>${r.byRole === 'user' ? 'You' : esc(r.byName || 'Facility')}</b> <span style="color:var(--muted);font-size:.8rem;">${esc(when(r.at))}</span><div style="white-space:pre-wrap;">${esc(r.message)}</div></div>`).join('')}</div>` : ''}
+            <form class="reply-form"><input placeholder="Write back…" maxlength="2000" aria-label="Reply" required /><button type="submit" class="secondary">Send</button></form>
+          </div>`).join('') : '<div class="empty">You have not reported anything. Hopefully all is well! 🎾</div>';
+      } catch (err) { el.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+    }
+
+    document.getElementById('list').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target.closest('.reply-form');
+      if (!form) return;
+      try {
+        await apiRequest(`/issues/${form.closest('.issue').dataset.id}/reply`, { method: 'POST', auth: true, body: { message: form.querySelector('input').value } });
+        load();
+      } catch (err) { alert(err.message); }
+    });
+
+    document.getElementById('issueForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('formMsg');
+      try {
+        await apiRequest('/issues', { method: 'POST', auth: true, body: {
+          category: document.getElementById('cat').value, subject: document.getElementById('subject').value, message: document.getElementById('message').value } });
+        e.target.reset();
+        showMsg(msg, 'Thanks! We got your report and will reply here.', 'success');
+        load();
+      } catch (err) { showMsg(msg, err.message); }
+    });
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Booking Status - MAKI's PickleBall Court</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="img/favicon-32.png" />
+  <meta name="theme-color" content="#0a325e" />
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="my-bookings.html">My Bookings</a>
+      <a href="booking-status.html">Booking Status</a>
+      <a href="profile.html">Profile</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 720px;">
+    <div class="card">
+      <h1 style="margin-top:0;">Check booking status</h1>
+      <p class="subtitle">Enter the reference number from your booking confirmation to view the latest booking and payment status.</p>
+      <form id="lookupForm">
+        <label for="referenceNumber">Booking reference number</label>
+        <input id="referenceNumber" name="referenceNumber" maxlength="40" placeholder="MKI-..." autocomplete="off" required />
+        <button type="submit" class="cta">Check status</button>
+      </form>
+      <div id="lookupMessage" class="msg" role="status" aria-live="polite"></div>
+    </div>
+    <div id="bookingResult" class="card" style="margin-top:18px;" hidden></div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    const statusLabels = {
+      pending: 'Pending',
+      confirmed: 'Confirmed',
+      completed: 'Completed',
+      cancelled: 'Cancelled',
+      rejected: 'Rejected',
+    };
+
+    function renderBooking(booking) {
+      const result = document.getElementById('bookingResult');
+      const status = statusLabels[booking.status] || booking.status;
+      result.innerHTML = `
+        <h2 style="margin-top:0;">Booking details</h2>
+        <div class="bk">
+          <div class="datechip"><b>${new Date(booking.date).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', day: 'numeric' })}</b><small>${new Date(booking.date).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', month: 'short', year: 'numeric' })}</small></div>
+          <div class="info">
+            <strong>${esc(booking.courtName || booking.court?.name || 'Court')}</strong>
+            <span>${esc(booking.startTime)} - ${esc(booking.endTime)}</span>
+            <span>Reference: ${esc(booking.referenceNumber)}</span>
+          </div>
+          <span class="pill ${['cancelled', 'rejected'].includes(booking.status) ? 'warn' : 'ok'}">${esc(status)}</span>
+        </div>
+        <div style="margin-top:18px;">
+          <p><b>Payment status:</b> ${esc((booking.paymentStatus || 'pending').replace(/\b\w/g, (letter) => letter.toUpperCase()))}</p>
+          <p><b>Booking created:</b> ${new Date(booking.createdAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}</p>
+          ${booking.statusReason ? `<p><b>Update:</b> ${esc(booking.statusReason)}</p>` : ''}
+        </div>
+        <p><a href="my-bookings.html">Go to My Bookings</a></p>
+      `;
+      result.hidden = false;
+    }
+
+    document.getElementById('lookupForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const message = document.getElementById('lookupMessage');
+      const result = document.getElementById('bookingResult');
+      const referenceNumber = document.getElementById('referenceNumber').value.trim().toUpperCase();
+      result.hidden = true;
+      message.textContent = '';
+      message.className = 'msg';
+
+      try {
+        const { booking } = await apiRequest(`/bookings/reference/${encodeURIComponent(referenceNumber)}`, { auth: true });
+        renderBooking(booking);
+        showMsg(message, 'Booking found.', 'success');
+      } catch (err) {
+        showMsg(message, err.message);
+      }
+    });
+
+    const referenceFromUrl = new URLSearchParams(window.location.search).get('reference');
+    if (referenceFromUrl) {
+      document.getElementById('referenceNumber').value = referenceFromUrl;
+      document.getElementById('lookupForm').requestSubmit();
+    }
+  </script>
+</body>
+</html>

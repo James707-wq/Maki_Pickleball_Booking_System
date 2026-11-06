@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Login - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="auth">
+  <div class="container">
+    <p class="auth-tag"><b>Play more. Wait less.</b><span>Book your pickleball court in seconds.</span></p>
+    <div class="card">
+      <div class="logo-banner"><img src="img/logo.png" alt="MAKI's Pickleball Court" /></div>
+      <h1>Welcome back</h1>
+      <p class="subtitle">Log in to manage your bookings</p>
+
+      <form id="loginForm">
+        <label for="email">Email</label>
+        <input type="email" id="email" required />
+
+        <label for="password">Password</label>
+        <input type="password" id="password" required />
+
+        <button type="submit">Log In</button>
+        <div id="msg" class="msg"></div>
+      </form>
+
+      <div class="links-row">
+        <a href="forgot-password.html">Forgot password?</a>
+        <a href="register.html">Create an account</a>
+      </div>
+      <p style="text-align:center; font-size:0.8rem; margin:16px 0 0;"><a href="admin-login.html" style="color:var(--muted);">Staff sign in</a></p>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('msg');
+      try {
+        const data = await apiRequest('/auth/login', {
+          method: 'POST',
+          body: {
+            email: document.getElementById('email').value,
+            password: document.getElementById('password').value,
+          },
+        });
+        localStorage.setItem('token', data.token);
+        window.location.href = 'dashboard.html';
+      } catch (err) {
+        showMsg(msg, err.message);
+      }
+    });
+  </script>
+</body>
+</html>

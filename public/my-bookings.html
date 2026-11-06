@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Bookings - MAKI's PickleBall Court</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="img/favicon-32.png" />
+  <meta name="theme-color" content="#0a325e" />
+  <style>
+    .booking-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .status-modal-backdrop {
+      position: fixed; inset: 0; background: rgba(10, 50, 94, 0.6); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+    }
+    .status-modal-backdrop.open { display: flex; }
+    .status-modal {
+      width: min(640px, 100%); background: #fff; border-radius: 18px; box-shadow: 0 20px 50px rgba(0,0,0,.18); padding: 22px;
+    }
+    .status-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 18px;
+    }
+    .status-item {
+      background: #f5f9ff; border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; 
+    }
+    .status-item span { display: block; font-size: .75rem; color: var(--muted); margin-bottom: 6px; }
+    .booking-lookup-link { margin: 12px 0 0 !important; line-height: 1.5; }
+    .checkin-note { color: var(--muted); font-size: .85rem; }
+    .booking-entry {
+      display: grid;
+      grid-template-columns: 58px minmax(200px, 1fr) minmax(280px, 320px);
+      align-items: start;
+      gap: 18px;
+      padding: 18px 0;
+      border-bottom: 1px solid rgba(10,50,94,.1);
+    }
+    .booking-entry:last-child { border-bottom: 0; }
+    .booking-entry .datechip { width: 58px; }
+    .booking-entry .info { min-width: 0; padding-top: 3px; }
+    .booking-entry .info strong { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+    .booking-entry .info span { display: block; color: var(--muted); font-size: .86rem; line-height: 1.5; overflow-wrap: anywhere; }
+    .booking-actions { min-width: 0; display: grid; gap: 10px; }
+    .booking-actions button { width: auto; min-width: 0; min-height: 42px; margin: 0; padding: 9px 12px; }
+    .booking-status-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .booking-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .booking-tools select { grid-column: 1 / -1; }
+    .booking-tools input, .booking-tools select { min-width: 0; margin: 0; }
+    .booking-tools .reschedule-btn, .booking-tools .cancel-btn { width: 100%; }
+    .booking-actions .checkin-note { justify-self: end; }
+    @media (max-width: 700px) {
+      .booking-entry { grid-template-columns: 54px minmax(0, 1fr); gap: 12px; }
+      .booking-entry .datechip { width: 54px; }
+      .booking-actions { grid-column: 2; width: 100%; }
+    }
+    @media (max-width: 420px) {
+      .booking-tools { grid-template-columns: 1fr; }
+      .booking-tools select { grid-column: auto; }
+      .booking-status-actions { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="my-bookings.html">My Bookings</a>
+      <a href="booking-status.html">Booking Status</a>
+      <a href="profile.html">Profile</a>
+      <a href="support.html">Support</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 960px;">
+    <div class="card">
+      <h1 style="margin-top:0;">My Bookings</h1>
+      <p class="subtitle">View upcoming bookings, review your history, and manage changes or cancellations.</p>
+      <label for="statusFilter">Filter bookings by status</label>
+      <select id="statusFilter">
+        <option value="all">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+        <option value="rejected">Rejected</option>
+      </select>
+      <p class="booking-lookup-link"><a href="booking-status.html">Look up a booking by reference number</a></p>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Upcoming & current</h2>
+      <div id="upcomingList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Booking history</h2>
+      <div id="historyList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <div id="statusModal" class="status-modal-backdrop" aria-hidden="true">
+    <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="statusTitle">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+        <h2 id="statusTitle" style="margin:0;">Booking status</h2>
+        <button type="button" class="secondary" id="closeStatusModal">Close</button>
+      </div>
+      <div id="statusBody" class="status-grid"></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    const STATUS_LABEL = {
+      pending: 'Pending',
+      confirmed: 'Confirmed',
+      completed: 'Completed',
+      cancelled: 'Cancelled',
+      rejected: 'Rejected',
+    };
+
+    let COURTS = [];
+    let BOOKINGS = [];
+
+    function manilaDateInputValue(date) {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date(date));
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return `${values.year}-${values.month}-${values.day}`;
+    }
+
+    function todayManila() {
+      return manilaDateInputValue(new Date());
+    }
+
+    async function loadCourts() {
+      const data = await apiRequest('/courts', { auth: true });
+      COURTS = data.courts || [];
+      return COURTS;
+    }
+
+    function renderStatusModal(booking) {
+      const modal = document.getElementById('statusModal');
+      const body = document.getElementById('statusBody');
+      body.innerHTML = `
+        <div class="status-item"><span>Reference</span><strong>${esc(booking.referenceNumber || '—')}</strong></div>
+        <div class="status-item"><span>Status</span><strong>${esc(STATUS_LABEL[booking.status] || booking.status)}</strong></div>
+        <div class="status-item"><span>Payment</span><strong>${esc((booking.paymentStatus || 'pending').replace(/\b\w/g, (m) => m.toUpperCase()))}</strong></div>
+        <div class="status-item"><span>Court</span><strong>${esc(booking.courtName || booking.court?.name || '—')}</strong></div>
+        <div class="status-item"><span>Date</span><strong>${fmtDate(booking.date)}</strong></div>
+        <div class="status-item"><span>Time</span><strong>${esc(booking.startTime)} - ${esc(booking.endTime)}</strong></div>
+        <div class="status-item"><span>Reason</span><strong>${esc(booking.statusReason || 'No note provided')}</strong></div>
+        <div class="status-item"><span>Booked</span><strong>${new Date(booking.createdAt || booking.updatedAt || Date.now()).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}</strong></div>
+        <div class="status-item"><span>Check-in</span><strong>${booking.checkedInAt ? `Checked in ${new Date(booking.checkedInAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}` : 'Not checked in'}</strong></div>
+      `;
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeStatusModal() {
+      document.getElementById('statusModal').classList.remove('open');
+      document.getElementById('statusModal').setAttribute('aria-hidden', 'true');
+    }
+
+    document.getElementById('closeStatusModal').addEventListener('click', closeStatusModal);
+    document.getElementById('statusModal').addEventListener('click', (event) => {
+      if (event.target.id === 'statusModal') closeStatusModal();
+    });
+
+    function renderList(containerId, bookings) {
+      const el = document.getElementById(containerId);
+      if (!bookings.length) {
+        el.innerHTML = '<div class="empty">No bookings in this section yet.</div>';
+        return;
+      }
+
+      el.innerHTML = bookings.map((booking) => {
+        const statusClass = ['cancelled', 'rejected'].includes(booking.status) ? 'warn' : 'ok';
+        const courtOptions = COURTS.map((court) => `
+          <option value="${esc(court._id)}" ${String(booking.court?._id || booking.court || '') === String(court._id) ? 'selected' : ''}>${esc(court.name)}</option>
+        `).join('');
+        return `
+          <div class="booking-entry">
+            <div class="datechip"><b>${new Date(booking.date).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', day: 'numeric' })}</b><small>${new Date(booking.date).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', month: 'short', year: 'numeric' })}</small></div>
+            <div class="info">
+              <strong>${esc(booking.courtName || booking.court?.name || 'Court')}</strong>
+              <span>${esc(booking.startTime)} - ${esc(booking.endTime)}</span>
+              <span>Ref: ${esc(booking.referenceNumber || '')}</span>
+              ${booking.statusReason ? `<span>Reason: ${esc(booking.statusReason)}</span>` : ''}
+            </div>
+            <div class="booking-actions">
+              <div class="booking-status-actions">
+                <span class="pill ${statusClass}">${esc(STATUS_LABEL[booking.status] || booking.status)}</span>
+                <button type="button" class="secondary status-btn" data-id="${esc(booking._id)}">View status</button>
+              </div>
+              ${booking.checkedInAt ? '<span class="checkin-note">✓ Checked in</span>' : ''}
+              ${['confirmed', 'completed'].includes(booking.status)
+                && manilaDateInputValue(booking.date) === todayManila()
+                && !booking.checkedInAt
+                ? `<button type="button" class="secondary checkin-btn" data-id="${esc(booking._id)}">Check in</button>`
+                : ''}
+              ${['pending', 'confirmed'].includes(booking.status) ? `
+                <div class="booking-tools reschedule-form" data-booking-id="${esc(booking._id)}">
+                  <select class="new-court" aria-label="Court">${courtOptions}</select>
+                  <input type="date" class="new-date" aria-label="New date" value="${manilaDateInputValue(booking.date)}" />
+                  <input type="time" class="new-time" aria-label="New time" value="${esc(booking.startTime)}" />
+                  <button type="button" class="secondary reschedule-btn">Reschedule</button>
+                  <button type="button" class="danger cancel-btn">Cancel</button>
+                </div>
+              ` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    async function loadBookings() {
+      try {
+        await loadCourts();
+        const [{ bookings: upcoming }, { bookings: history }] = await Promise.all([
+          apiRequest('/bookings?scope=upcoming', { auth: true }),
+          apiRequest('/bookings?scope=history', { auth: true }),
+        ]);
+        BOOKINGS = [...upcoming, ...history];
+        renderFilteredBookings();
+
+        document.querySelectorAll('.status-btn').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const id = button.dataset.id;
+            try {
+              const { booking } = await apiRequest(`/bookings/${id}`, { auth: true });
+              renderStatusModal(booking);
+            } catch (err) {
+              alert(err.message);
+            }
+          });
+        });
+
+        document.querySelectorAll('.checkin-btn').forEach((button) => {
+          button.addEventListener('click', async () => {
+            button.disabled = true;
+            try {
+              await apiRequest(`/bookings/${button.dataset.id}/checkin`, { method: 'POST', auth: true });
+              await loadBookings();
+            } catch (err) {
+              button.disabled = false;
+              alert(err.message);
+            }
+          });
+        });
+
+        document.querySelectorAll('.cancel-btn').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const id = button.closest('.reschedule-form').dataset.bookingId;
+            const reason = window.prompt('Reason for cancellation (optional):', 'Customer cancelled this booking');
+            try {
+              await apiRequest(`/bookings/${id}/cancel`, {
+                method: 'PATCH',
+                auth: true,
+                body: { reason: reason || 'Customer cancelled this booking' },
+              });
+              loadBookings();
+            } catch (err) {
+              alert(err.message);
+            }
+          });
+        });
+
+        document.querySelectorAll('.reschedule-btn').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const form = button.closest('.reschedule-form');
+            const id = form.dataset.bookingId;
+            const date = form.querySelector('.new-date').value;
+            const startTime = form.querySelector('.new-time').value;
+            const courtId = form.querySelector('.new-court').value;
+            if (!date || !startTime) {
+              return alert('Choose a new date and time first.');
+            }
+
+            try {
+              await apiRequest(`/bookings/${id}/reschedule`, {
+                method: 'PATCH',
+                auth: true,
+                body: { date, startTime, courtId },
+              });
+              loadBookings();
+            } catch (err) {
+              alert(err.message);
+            }
+          });
+        });
+      } catch (err) {
+        document.getElementById('upcomingList').innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+        document.getElementById('historyList').innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+
+    function bookingEndInstant(booking) {
+      const [hours, minutes] = booking.endTime.split(':').map(Number);
+      return new Date(booking.date).getTime() + (hours * 60 + minutes) * 60_000;
+    }
+
+    function renderFilteredBookings() {
+      const selectedStatus = document.getElementById('statusFilter').value;
+      const matchesStatus = (booking) => selectedStatus === 'all' || booking.status === selectedStatus;
+      const upcoming = BOOKINGS.filter((b) => ['pending', 'confirmed'].includes(b.status)
+        && bookingEndInstant(b) > Date.now() && matchesStatus(b));
+      const history = BOOKINGS.filter((b) => ['completed', 'cancelled', 'rejected'].includes(b.status) && matchesStatus(b));
+      renderList('upcomingList', upcoming);
+      renderList('historyList', history);
+    }
+
+    document.getElementById('statusFilter').addEventListener('change', loadBookings);
+    loadBookings();
+  </script>
+</body>
+</html>

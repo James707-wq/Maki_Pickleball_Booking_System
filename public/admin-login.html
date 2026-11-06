@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin sign in - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/admin.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="admin-login">
+  <div class="login-wrap">
+    <section class="login-art">
+      <img class="logo" src="img/logo.png" alt="MAKI's Pickleball Court" />
+    </section>
+
+    <section class="login-form">
+      <form id="loginForm" novalidate>
+        <h2>Sign in to admin</h2>
+        <p class="muted" style="margin:4px 0 8px;">Staff and administrator accounts only.</p>
+
+        <label class="f">Email
+          <input type="email" id="email" autocomplete="username" required autofocus />
+        </label>
+        <label class="f">Password
+          <span class="pw">
+            <input type="password" id="password" autocomplete="current-password" required />
+            <button type="button" id="pwToggle" aria-label="Show password">Show</button>
+          </span>
+        </label>
+        <button class="btn primary" id="submitBtn" type="submit">Sign in</button>
+        <div id="msg" class="msg error hidden" role="alert"></div>
+        <p style="margin-top:18px;"><a href="index.html" class="muted">Customer login</a></p>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    const KEY = 'adminToken';
+    const msg = document.getElementById('msg');
+    const show = (t) => { msg.textContent = t; msg.classList.remove('hidden'); };
+
+    // already signed in? go straight in
+    (async () => {
+      const t = localStorage.getItem(KEY);
+      if (!t) return;
+      try {
+        const r = await fetch('/api/admin/me', { headers: { Authorization: 'Bearer ' + t } });
+        if (r.ok) location.replace('admin.html');
+        else localStorage.removeItem(KEY);
+      } catch (e) { /* stay on login */ }
+    })();
+
+    document.getElementById('pwToggle').addEventListener('click', (e) => {
+      const input = document.getElementById('password');
+      const reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      e.target.textContent = reveal ? 'Hide' : 'Show';
+      e.target.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.classList.add('hidden');
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true; btn.classList.add('is-busy');
+      try {
+        const res = await fetch('/api/auth/admin-login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Could not sign in');
+        localStorage.setItem(KEY, data.token);
+        location.replace('admin.html');
+      } catch (err) {
+        show(err.message);
+        btn.disabled = false; btn.classList.remove('is-busy');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Create Account - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="auth">
+  <div class="navbar">
+    <a class="brand" href="index.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links"><a href="index.html">Log in</a></div>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <div class="logo-banner"><img src="img/logo.png" alt="MAKI's Pickleball Court" /></div>
+      <h1>Create your account</h1>
+      <p class="subtitle">Book courts and manage your schedule</p>
+
+      <form id="registerForm">
+        <div class="row-2">
+          <div>
+            <label for="firstName">First name</label>
+            <input type="text" id="firstName" required />
+          </div>
+          <div>
+            <label for="lastName">Last name</label>
+            <input type="text" id="lastName" required />
+          </div>
+        </div>
+
+        <label for="email">Email</label>
+        <input type="email" id="email" required />
+
+        <label for="phone">Phone (optional)</label>
+        <input type="tel" id="phone" />
+
+        <label for="password">Password</label>
+        <input type="password" id="password" minlength="8" required />
+
+        <label for="confirmPassword">Confirm password</label>
+        <input type="password" id="confirmPassword" minlength="8" required />
+
+        <button type="submit">Create Account</button>
+        <div id="msg" class="msg"></div>
+      </form>
+
+      <div class="links-row">
+        <span></span>
+        <a href="index.html">Already have an account?</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('msg');
+      const password = document.getElementById('password').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+
+      if (password !== confirmPassword) {
+        return showMsg(msg, 'Passwords do not match');
+      }
+
+      try {
+        const data = await apiRequest('/auth/register', {
+          method: 'POST',
+          body: {
+            firstName: document.getElementById('firstName').value,
+            lastName: document.getElementById('lastName').value,
+            email: document.getElementById('email').value,
+            phone: document.getElementById('phone').value,
+            password,
+          },
+        });
+        localStorage.setItem('token', data.token);
+        window.location.href = 'dashboard.html';
+      } catch (err) {
+        showMsg(msg, err.message);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Profile - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="my-bookings.html">My Bookings</a>
+      <a href="profile.html">Profile</a>
+      <a href="support.html">Support</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <h1>My Profile</h1>
+      <p class="subtitle">View and update your account details</p>
+
+      <form id="profileForm">
+        <div class="row-2">
+          <div>
+            <label for="firstName">First name</label>
+            <input type="text" id="firstName" required />
+          </div>
+          <div>
+            <label for="lastName">Last name</label>
+            <input type="text" id="lastName" required />
+          </div>
+        </div>
+
+        <label for="email">Email (cannot be changed)</label>
+        <input type="email" id="email" disabled />
+
+        <label for="phone">Phone</label>
+        <input type="tel" id="phone" />
+
+        <button type="submit">Save Changes</button>
+        <div id="profileMsg" class="msg"></div>
+      </form>
+    </div>
+
+    <div class="card" id="password" style="margin-top: 20px;">
+      <h1>Change Password</h1>
+      <p class="subtitle">Update your account password</p>
+
+      <form id="passwordForm">
+        <label for="currentPassword">Current password</label>
+        <input type="password" id="currentPassword" required />
+
+        <label for="newPassword">New password</label>
+        <input type="password" id="newPassword" minlength="8" required />
+
+        <label for="confirmNewPassword">Confirm new password</label>
+        <input type="password" id="confirmNewPassword" minlength="8" required />
+
+        <button type="submit">Change Password</button>
+        <div id="passwordMsg" class="msg"></div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    async function loadProfile() {
+      const data = await apiRequest('/users/profile', { auth: true });
+      document.getElementById('firstName').value = data.user.firstName;
+      document.getElementById('lastName').value = data.user.lastName;
+      document.getElementById('email').value = data.user.email;
+      document.getElementById('phone').value = data.user.phone || '';
+    }
+    loadProfile();
+
+    // UF-106 Edit Profile
+    document.getElementById('profileForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('profileMsg');
+      try {
+        await apiRequest('/users/profile', {
+          method: 'PUT',
+          auth: true,
+          body: {
+            firstName: document.getElementById('firstName').value,
+            lastName: document.getElementById('lastName').value,
+            phone: document.getElementById('phone').value,
+          },
+        });
+        showMsg(msg, 'Profile updated successfully', 'success');
+      } catch (err) {
+        showMsg(msg, err.message);
+      }
+    });
+
+    // UF-107 Change Password
+    document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('passwordMsg');
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+
+      if (newPassword !== confirmNewPassword) {
+        return showMsg(msg, 'New passwords do not match');
+      }
+
+      try {
+        await apiRequest('/users/change-password', {
+          method: 'PUT',
+          auth: true,
+          body: {
+            currentPassword: document.getElementById('currentPassword').value,
+            newPassword,
+          },
+        });
+        showMsg(msg, 'Password changed successfully', 'success');
+        document.getElementById('passwordForm').reset();
+      } catch (err) {
+        showMsg(msg, err.message);
+      }
+    });
+  </script>
+</body>
+</html>

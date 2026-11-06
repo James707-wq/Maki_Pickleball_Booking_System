@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms & Policies - MAKI's PickleBall Court</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="img/favicon-32.png" />
+  <meta name="theme-color" content="#0a325e" />
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="my-bookings.html">My Bookings</a>
+      <a href="support.html">Support</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 720px;">
+    <div class="card">
+      <h1 style="margin-top:0;">Terms & Policies</h1>
+      <p class="subtitle">Booking rules, cancellation policy, payment terms, and service expectations.</p>
+
+      <h2>Booking policy</h2>
+      <ul>
+        <li>Bookings must be made for an available time slot and are confirmed only after the facility approves them when approval is required.</li>
+        <li>Guests are responsible for arriving on time. Late arrivals may reduce available court time and no refund is guaranteed.</li>
+        <li>Only the booking holder may change, cancel, or confirm court details for a reservation.</li>
+      </ul>
+
+      <h2>Cancellation policy</h2>
+      <ul>
+        <li>Pending or confirmed bookings can be cancelled before the reserved start time.</li>
+        <li>Cancelled bookings may be refunded or credited according to facility rules and payment status.</li>
+        <li>Bookings cancelled after the court has started may be treated as completed or forfeited.</li>
+      </ul>
+
+      <h2>Payment policy</h2>
+      <ul>
+        <li>Payments are tracked as pending, paid, failed, or refunded.</li>
+        <li>Proof of payment may be requested before a customer is marked as paid by staff.</li>
+        <li>Any promotional code or discount is applied at the time the booking is created.</li>
+      </ul>
+
+      <h2>Terms of service</h2>
+      <ul>
+        <li>Customers agree to use the facility responsibly and comply with staff directions.</li>
+        <li>MAKI's PickleBall Court reserves the right to reject or cancel bookings that violate safety, fairness, or operating rules.</li>
+        <li>Facility notices, announcements, and support communication are considered part of the service experience.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+  </script>
+</body>
+</html>

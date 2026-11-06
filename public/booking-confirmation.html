@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Booking Confirmed - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+<style>
+  .receipt { border: 1px dashed var(--border); border-radius: 8px; padding: 18px; margin-top: 18px; }
+  .receipt-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.92rem; }
+  .receipt-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; font-weight: 700; }
+  .ref-box {
+    text-align: center; background: #e8f1fc; border-left: 4px solid var(--cyan); border-radius: 8px; padding: 16px; margin-top: 16px;
+  }
+  .ref-box .ref { font-size: 1.3rem; font-weight: 700; color: var(--primary-dark); letter-spacing: 1px; }
+  @media print { .navbar, .no-print { display: none !important; } }
+</style>
+</head>
+<body class="app">
+  <div class="navbar no-print">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="my-bookings.html">My Bookings</a>
+      <a href="profile.html">Profile</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="container" style="max-width: 480px;">
+    <div class="card">
+      <div id="content"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    const bookingId = new URLSearchParams(window.location.search).get('id');
+
+    async function loadBooking() {
+      const el = document.getElementById('content');
+      try {
+        const data = await apiRequest(`/bookings/${bookingId}`, { auth: true });
+        const b = data.booking;
+
+        el.innerHTML = `
+          ${b.status === 'pending'
+            ? `<h1 style="margin-top:0;">🕓 Booking Received</h1>
+               <p class="subtitle">The facility needs to approve this booking. Your slot is held, and you'll get a notification once it's confirmed.</p>`
+            : `<h1 style="margin-top:0;">✅ Booking Confirmed</h1>
+               <p class="subtitle">Your court is reserved. Show this reference at check-in.</p>`}
+
+          <div class="ref-box">
+            <div style="font-size:0.8rem; color:var(--muted);">Booking Reference</div>
+            <div class="ref">${esc(b.referenceNumber)}</div>
+          </div>
+
+          <div class="receipt">
+            <div class="receipt-row"><span>Court</span><span>${esc(b.court?.name || b.courtName)}</span></div>
+            <div class="receipt-row"><span>Location</span><span>${esc(b.court?.location || '—')}</span></div>
+            <div class="receipt-row"><span>Date</span><span>${fmtDate(b.date)}</span></div>
+            <div class="receipt-row"><span>Time</span><span>${esc(b.startTime)}–${esc(b.endTime)}</span></div>
+            <div class="receipt-row"><span>Booking Status</span><span style="text-transform:capitalize;">${esc(b.status)}</span></div>
+            <div class="receipt-row"><span>Payment Status</span><span style="text-transform:capitalize;">${esc(b.paymentStatus)}</span></div>
+            ${b.promoCode ? `<div class="receipt-row"><span>Promo ${esc(b.promoCode)}</span><span style="color:#14633c;">−₱${esc(b.discount)}</span></div>` : ''}
+            <div class="receipt-row total"><span>Total Fee</span><span>₱${esc(b.totalFee)}</span></div>
+          </div>
+
+          <div id="paySection" class="no-print"></div>
+          <div id="reviewSection" class="no-print"></div>
+
+          <div class="no-print" style="display:flex; gap:10px; margin-top:16px;">
+            <button type="button" class="secondary" onclick="window.print()">Print Receipt</button>
+            <a href="dashboard.html" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Go to Dashboard</a>
+            <a href="booking-status.html?reference=${encodeURIComponent(b.referenceNumber)}" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Check Status</a>
+          </div>
+        `;
+        renderPayment(b);
+        renderReview(b);
+      } catch (err) {
+        el.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+
+    // UF-121 / AF-121: tell the facility how you paid so staff can verify it
+    function renderPayment(b) {
+      const box = document.getElementById('paySection');
+      if (['cancelled', 'rejected'].includes(b.status) || b.paymentStatus === 'refunded') { box.innerHTML = ''; return; }
+      if (b.paymentStatus === 'paid') { box.innerHTML = '<p style="font-size:.85rem;color:#14633c;margin-top:12px;">✅ Payment received. Thank you!</p>'; return; }
+      if (b.paymentStatus === 'pending' && b.paymentSubmittedAt) {
+        box.innerHTML = `<p style="font-size:.85rem;color:var(--muted);margin-top:12px;">🕓 We received your ${esc(b.paymentMethod)} reference <b>${esc(b.paymentReference)}</b>. Staff will verify it shortly.</p>`;
+        return;
+      }
+      box.innerHTML = `
+        <form id="payForm" class="receipt" style="margin-top:16px;">
+          <strong>Already paid? Send us the details</strong>
+          ${b.paymentStatus === 'failed' ? `<p class="msg error" style="display:block;">Your last payment could not be verified${b.paymentNote ? ': ' + esc(b.paymentNote) : ''}. Please check and send it again.</p>` : '<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0;">You can also just pay at the facility before your time.</p>'}
+          <label for="payMethod">Paid with</label>
+          <select id="payMethod" required><option value="">Choose…</option><option>GCash</option><option>Maya</option><option>Bank transfer</option><option>Card</option><option>Other</option></select>
+          <label for="payRef">Reference number</label>
+          <input id="payRef" maxlength="60" placeholder="e.g. GCash ref no." required />
+          <button type="submit" class="cta" style="margin-top:12px;">Send payment details</button>
+          <div id="payMsg" class="msg"></div>
+        </form>`;
+      document.getElementById('payForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('payMsg');
+        try {
+          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
+          renderPayment(r.booking);
+        } catch (err) { showMsg(msg, err.message); }
+      });
+    }
+
+    // UF-133: rate a completed booking (once)
+    async function renderReview(b) {
+      const box = document.getElementById('reviewSection');
+      if (b.status !== 'completed') { box.innerHTML = ''; return; }
+      let existing = null;
+      try { existing = (await apiRequest(`/feedback/booking/${bookingId}`, { auth: true })).feedback; } catch (e) { /* show the form anyway */ }
+      if (existing) {
+        box.innerHTML = `<div class="receipt" style="margin-top:16px;"><strong>Thanks for your feedback!</strong><div style="color:#e0a800;font-size:1.2rem;">${'★'.repeat(existing.rating)}<span style="color:#d3dae6;">${'★'.repeat(5 - existing.rating)}</span></div>${existing.comment ? `<p style="margin:6px 0 0;">${esc(existing.comment)}</p>` : ''}</div>`;
+        return;
+      }
+      box.innerHTML = `
+        <form id="reviewForm" class="receipt" style="margin-top:16px;">
+          <strong>How was your game?</strong>
+          <div id="starPick" role="radiogroup" aria-label="Rating" style="font-size:2rem;line-height:1;margin:6px 0;cursor:pointer;user-select:none;"></div>
+          <textarea id="fbText" rows="3" maxlength="1000" placeholder="Tell us about the court and facilities (optional)"></textarea>
+          <button type="submit" class="cta" style="margin-top:10px;">Send feedback</button>
+          <div id="fbMsg" class="msg"></div>
+        </form>`;
+      let rating = 0;
+      const pick = document.getElementById('starPick');
+      const paint = () => { pick.innerHTML = [1, 2, 3, 4, 5].map((n) => `<span role="radio" aria-checked="${rating === n}" aria-label="${n} star${n > 1 ? 's' : ''}" tabindex="0" data-n="${n}" style="color:${n <= rating ? '#e0a800' : '#d3dae6'};">★</span>`).join(''); };
+      paint();
+      const choose = (el) => { if (el && el.dataset.n) { rating = Number(el.dataset.n); paint(); } };
+      pick.addEventListener('click', (e) => choose(e.target));
+      pick.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(e.target); } });
+      document.getElementById('reviewForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('fbMsg');
+        if (!rating) return showMsg(msg, 'Tap a star to rate your visit');
+        try {
+          await apiRequest('/feedback', { method: 'POST', auth: true, body: { bookingId, rating, comment: document.getElementById('fbText').value } });
+          renderReview(b);
+        } catch (err) { showMsg(msg, err.message); }
+      });
+    }
+
+    loadBooking();
+  </script>
+</body>
+</html>

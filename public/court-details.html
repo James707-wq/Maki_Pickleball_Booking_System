@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Court Details - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="profile.html">Profile</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="dash-container" style="max-width: 700px;">
+    <a href="courts.html" style="color:var(--primary); text-decoration:none; font-size:0.85rem;">&larr; Back to courts</a>
+
+    <div class="card" style="margin-top:12px;">
+      <div id="courtInfo"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h2 style="margin-top:0;">View Schedule</h2>
+      <label for="dateInput">Select a date</label>
+      <input type="date" id="dateInput" />
+
+      <div id="slotsWrap">
+        <div class="empty">Pick a date to see available time slots.</div>
+      </div>
+
+      <div id="selectionSummary" class="selection-summary"></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    const courtId = new URLSearchParams(window.location.search).get('id');
+    const dateInput = document.getElementById('dateInput');
+    let selectedSlot = null;
+    let currentCourt = null;
+
+    // Default to today, min = today (no booking into the past)
+    const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); // today in Manila
+    dateInput.value = today;
+    dateInput.min = today;
+
+    async function loadCourtInfo() {
+      const el = document.getElementById('courtInfo');
+      try {
+        const data = await apiRequest(`/courts/${courtId}`, { auth: true });
+        const c = data.court;
+        currentCourt = c;
+        el.innerHTML = `
+          <span class="status-badge status-${esc(c.status)}">${esc(c.status)}</span>
+          <h1 style="margin:6px 0;">${esc(c.name)}</h1>
+          <p style="color:var(--muted); margin-top:-6px;">${esc(c.location)}</p>
+          <p>${esc(c.description || '')}</p>
+          <p><strong>₱${esc(c.pricePerHour)}</strong> / hour &middot; Open ${esc(c.openTime)}–${esc(c.closeTime)}</p>
+          <div class="tags">${(c.facilities || []).map(f => `<span class="tag">${esc(f)}</span>`).join('')}</div>
+        `;
+      } catch (err) {
+        el.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+
+    // UF-111 / UF-114: load availability for the selected date
+    async function loadAvailability() {
+      selectedSlot = null;
+      document.getElementById('selectionSummary').style.display = 'none';
+
+      const wrap = document.getElementById('slotsWrap');
+      wrap.innerHTML = '<div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div>';
+
+      try {
+        const data = await apiRequest(`/courts/${courtId}/availability?date=${dateInput.value}`, { auth: true });
+
+        if (data.courtStatus !== 'available') {
+          wrap.innerHTML = `<div class="empty">This court is currently marked "${esc(data.courtStatus)}" and can't be booked.</div>`;
+          return;
+        }
+        if (!data.slots.length) {
+          wrap.innerHTML = '<div class="empty">No time slots configured for this court.</div>';
+          return;
+        }
+
+        wrap.innerHTML = `<div class="slots-grid" id="slotsGrid"></div>`;
+        const grid = document.getElementById('slotsGrid');
+
+        data.slots.forEach(slot => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = `slot-btn ${slot.status}`;
+          btn.textContent = slot.startTime;
+          btn.disabled = slot.status !== 'available'; // booked, blocked or already passed
+          btn.addEventListener('click', () => selectSlot(slot, btn));
+          grid.appendChild(btn);
+        });
+      } catch (err) {
+        wrap.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+
+    // UF-115: Select Date and Time
+    // UF-118: Booking Summary (shown before confirming)
+    function selectSlot(slot, btn) {
+      document.querySelectorAll('.slot-btn.selected').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      selectedSlot = slot;
+
+      renderSummary();
+    }
+
+    // AF-127: optional promo code. The server re-checks it when the booking is made.
+    let promo = null; // { code, title, discount }
+    const baseFee = () => Math.round(currentCourt.pricePerHour * currentCourt.slotDurationMinutes / 60);
+
+    function renderSummary(note = '', noteType = 'error') {
+      const summary = document.getElementById('selectionSummary');
+      const fee = baseFee();
+      const total = promo ? Math.max(fee - promo.discount, 0) : fee;
+      summary.style.display = 'block';
+      summary.innerHTML = `
+        <strong>Booking Summary</strong>
+        <div style="margin-top:8px;">
+          Date: <strong>${esc(dateInput.value)}</strong><br>
+          Time: <strong>${esc(selectedSlot.startTime)}–${esc(selectedSlot.endTime)}</strong><br>
+          Fee: ${promo ? `<s style="color:var(--muted);">₱${fee}</s> ` : ''}<strong>₱${total}</strong>
+          ${promo ? `<br><span style="color:#14633c;font-size:.85rem;">Promo ${esc(promo.code)} applied: −₱${promo.discount}</span>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <input id="promoInput" placeholder="Promo code (optional)" maxlength="20" value="${esc(promo ? promo.code : '')}" style="margin:0;text-transform:uppercase;" aria-label="Promo code" />
+          <button type="button" id="promoBtn" class="secondary" style="width:auto;margin:0;padding:0 16px;">${promo ? 'Remove' : 'Apply'}</button>
+        </div>
+        <div id="promoMsg" class="msg ${note ? noteType : ''}" ${note ? '' : 'style="display:none"'}>${esc(note)}</div>
+        <button type="button" id="confirmBookingBtn" class="cta" style="margin-top:14px;">Confirm Booking</button>
+        <div id="bookingMsg" class="msg"></div>
+      `;
+      document.getElementById('confirmBookingBtn').addEventListener('click', confirmBooking);
+      document.getElementById('promoBtn').addEventListener('click', async () => {
+        if (promo) { promo = null; return renderSummary(); }
+        const code = document.getElementById('promoInput').value.trim();
+        if (!code) return renderSummary('Enter a promo code first');
+        try {
+          const r = await apiRequest('/promotions/check', { method: 'POST', auth: true, body: { code, fee: baseFee() } });
+          promo = { code: r.code, title: r.title, discount: r.discount };
+          renderSummary();
+        } catch (err) { promo = null; renderSummary(err.message); }
+      });
+    }
+
+    // UF-116: Court Booking
+    async function confirmBooking() {
+      const msg = document.getElementById('bookingMsg');
+      const btn = document.getElementById('confirmBookingBtn');
+      btn.disabled = true;
+      btn.textContent = 'Booking...';
+
+      try {
+        const data = await apiRequest('/bookings', {
+          method: 'POST',
+          auth: true,
+          body: {
+            courtId,
+            date: dateInput.value,
+            startTime: selectedSlot.startTime,
+            promoCode: promo ? promo.code : undefined,
+          },
+        });
+        // UF-119: Booking Confirmation
+        window.location.href = `booking-confirmation.html?id=${data.booking._id}`;
+      } catch (err) {
+        showMsg(msg, err.message);
+        btn.disabled = false;
+        btn.textContent = 'Confirm Booking';
+      }
+    }
+
+    dateInput.addEventListener('change', loadAvailability);
+
+    loadCourtInfo();
+    loadAvailability();
+  </script>
+</body>
+</html>

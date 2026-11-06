@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Courts - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="app">
+  <div class="navbar">
+    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
+      <img src="img/logo-mark.png" alt="" />
+      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
+    </a>
+    <div class="links">
+      <a href="dashboard.html">Dashboard</a>
+      <a href="courts.html">Courts</a>
+      <a href="profile.html">Profile</a>
+      <a href="#" id="logoutBtn">Log out</a>
+    </div>
+  </div>
+
+  <div class="dash-container">
+    <h1>Available Courts</h1>
+
+    <div class="filters-bar">
+      <input type="text" id="searchInput" placeholder="Search by name or location..." />
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="available">Available</option>
+        <option value="maintenance">Maintenance</option>
+        <option value="unavailable">Unavailable</option>
+        <option value="closed">Closed</option>
+      </select>
+      <input type="text" id="facilityFilter" placeholder="Filter by facility (e.g. Indoor)" />
+    </div>
+
+    <div id="courtGrid" class="court-grid"><div class="skel-grid" aria-label="Loading courts"><span class="skel-card"></span><span class="skel-card"></span><span class="skel-card"></span></div></div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    let debounceTimer;
+    const search = document.getElementById('searchInput');
+    const status = document.getElementById('statusFilter');
+    const facility = document.getElementById('facilityFilter');
+
+    async function loadCourts() {
+      const grid = document.getElementById('courtGrid');
+      grid.innerHTML = '<div class="skel-grid" aria-label="Loading courts"><span class="skel-card"></span><span class="skel-card"></span><span class="skel-card"></span></div>';
+
+      const params = new URLSearchParams();
+      if (search.value) params.set('q', search.value);
+      if (status.value) params.set('status', status.value);
+      if (facility.value) params.set('facility', facility.value);
+
+      try {
+        const data = await apiRequest(`/courts?${params.toString()}`, { auth: true });
+        if (!data.courts.length) {
+          grid.innerHTML = '<div class="empty">No courts match your search/filters.</div>';
+          return;
+        }
+
+        grid.innerHTML = data.courts.map(c => `
+          <a class="court-card" href="court-details.html?id=${esc(c._id)}">
+            <span class="status-badge status-${esc(c.status)}">${esc(c.status)}</span>
+            <h3>${esc(c.name)}</h3>
+            <div class="loc">${esc(c.location)}</div>
+            <div class="price">₱${esc(c.pricePerHour)} / hour</div>
+            <div class="tags">
+              ${(c.facilities || []).map(f => `<span class="tag">${esc(f)}</span>`).join('')}
+            </div>
+          </a>
+        `).join('');
+      } catch (err) {
+        grid.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+
+    [search, status, facility].forEach(el => {
+      el.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(loadCourts, 300);
+      });
+      el.addEventListener('change', loadCourts);
+    });
+
+    loadCourts();
+  </script>
+</body>
+</html>
