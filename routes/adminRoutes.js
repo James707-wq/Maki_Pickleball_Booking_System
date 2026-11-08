@@ -641,11 +641,6 @@ router.patch('/bookings/:id/status', authorize('bookings'), async (req, res) => 
     booking.statusChangedBy = req.user._id;
     booking.statusChangedAt = new Date();
     await booking.save();
-    // AF-123: keep the transaction history in step with manual payment changes
-    if (['paid', 'refunded', 'failed'].includes(paymentStatus)) {
-      await logTransaction(booking, paymentStatus === 'paid' ? 'payment' : paymentStatus === 'refunded' ? 'refund' : 'failed',
-        { method: booking.paymentMethod, by: req.user._id, note: 'Manual update' });
-    }
 
     const ref = booking.referenceNumber;
     const messages = {
@@ -750,6 +745,11 @@ router.patch('/bookings/:id/payment', authorize('payments'), async (req, res) =>
     if (req.body.paymentMethod !== undefined) booking.paymentMethod = String(req.body.paymentMethod).trim().slice(0, 40);
     booking.paidAt = paymentStatus === 'paid' ? new Date() : paymentStatus === 'pending' ? undefined : booking.paidAt;
     await booking.save();
+        // AF-123: keep the transaction history in step with manual payment changes
+    if (['paid', 'refunded', 'failed'].includes(paymentStatus)) {
+      await logTransaction(booking, paymentStatus === 'paid' ? 'payment' : paymentStatus === 'refunded' ? 'refund' : 'failed',
+        { method: booking.paymentMethod, by: req.user._id, note: 'Manual update' });
+    }
 
     const ref = booking.referenceNumber;
     const messages = {
