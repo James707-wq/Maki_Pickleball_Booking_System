@@ -211,7 +211,8 @@ router.patch('/:id/cancel', async (req, res) => {
     if (booking.paymentStatus === 'paid') booking.paymentStatus = 'refunded';
     await booking.save();
 
-    await U.notify(req.user._id, `Your booking ${booking.referenceNumber} was cancelled. Reason: ${reason}`);
+           const refundNote = booking.paymentStatus === 'refunded' ? ' Your payment will be refunded.' : '';
+       await U.notify(req.user._id, `Cancelled: your booking ${booking.referenceNumber} for ${booking.courtName} on ${U.toDateStr(booking.date)} at ${booking.startTime} was cancelled. Reason: ${reason}.${refundNote}`);
     res.json({ success: true, booking });
   } catch (err) {
     handleError(res, err);
@@ -279,6 +280,14 @@ router.patch('/:id/reschedule', async (req, res) => {
     if (!court) return res.status(404).json({ success: false, message: 'Court not found' });
 
     const check = await U.validateSlot(court, targetDate, targetStart, { excludeBookingId: booking._id });
+           // the customer can't move onto a time they already hold on another court
+       const ownClash = await Booking.findOne({
+         user: req.user._id, _id: { $ne: booking._id }, date: check.bookingDate, startTime: targetStart,
+         status: { $in: ['pending', 'confirmed'] },
+       });
+       if (ownClash) {
+         return res.status(409).json({ success: false, message: `You already have booking ${ownClash.referenceNumber} at that date and time. Please choose another time.` });
+       }
     if (!check.ok) {
       return res.status(check.code).json({ success: false, message: check.message });
     }

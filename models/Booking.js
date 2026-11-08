@@ -51,15 +51,18 @@ const BookingSchema = new mongoose.Schema(
     statusReason: { type: String, trim: true, default: '' }, // AF-117 cancellation / rejection reason
     statusChangedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     statusChangedAt: { type: Date },
-    slotActive: { type: Boolean, default: true }, // derived; backs the unique slot index
+    slotActive: { type: Boolean, default: true }, // derived; backs the unique slot 
+           reminderSentAt: { type: Date },               // 2-hour reminder already sent
   },
   { timestamps: true }
 );
 
-BookingSchema.pre('validate', function (next) {
-  this.slotActive = ACTIVE.includes(this.status);
-  next();
-});
+   BookingSchema.pre('validate', function (next) {
+     this.slotActive = ACTIVE.includes(this.status);
+     // moved to a new date/time -> the new time gets its own reminder
+     if (!this.isNew && (this.isModified('date') || this.isModified('startTime'))) this.reminderSentAt = undefined;
+     next();
+   });
 
 // One active booking per court + date + start time (race-condition proof).
 // Equality-only partial filter, so it works on every MongoDB version.

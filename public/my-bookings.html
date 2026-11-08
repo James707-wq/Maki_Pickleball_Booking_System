@@ -164,6 +164,35 @@
     document.getElementById('statusModal').addEventListener('click', (event) => {
       if (event.target.id === 'statusModal') closeStatusModal();
     });
+    // Reschedule: only open times can be picked. Booked / blocked / past times are shown but disabled.
+    async function loadSlots(form) {
+      const sel = form.querySelector('.new-time');
+      const courtId = form.querySelector('.new-court').value;
+      const date = form.querySelector('.new-date').value;
+      if (!courtId || !date) { sel.innerHTML = '<option value="">Pick a date</option>'; return; }
+      sel.innerHTML = '<option value="">Loading times...</option>';
+      try {
+        const { slots } = await apiRequest(`/courts/${courtId}/availability?date=${date}`, { auth: true });
+        const isOriginal = (slot) => courtId === form.dataset.court && date === form.dataset.date && slot.startTime === form.dataset.start;
+        const label = { booked: 'already booked', blocked: 'not open', past: 'passed' };
+        sel.innerHTML = slots.length ? slots.map((slot) => {
+          const own = isOriginal(slot);
+          const open = slot.status === 'available' || own;
+          return `<option value="${esc(slot.startTime)}" ${open ? '' : 'disabled'}>${esc(slot.startTime)} - ${esc(slot.endTime)}${own ? ' (current booking)' : open ? '' : ' (' + (label[slot.status] || 'unavailable') + ')'}</option>`;
+        }).join('') : '<option value="">No times on this day</option>';
+        const firstOpen = [...sel.options].find((o) => !o.disabled && o.value);
+        const current = [...sel.options].find((o) => o.value === form.dataset.start && !o.disabled);
+        sel.value = (current || firstOpen || sel.options[0]).value;
+      } catch (err) {
+        sel.innerHTML = `<option value="">${esc(err.message)}</option>`;
+      }
+    }
+    function initSlots(form) {
+      loadSlots(form);
+      form.querySelector('.new-court').addEventListener('change', () => loadSlots(form));
+      form.querySelector('.new-date').addEventListener('change', () => loadSlots(form));
+    }
+
 
     function renderList(containerId, bookings) {
       const el = document.getElementById(containerId);
@@ -198,10 +227,10 @@
                 ? `<button type="button" class="secondary checkin-btn" data-id="${esc(booking._id)}">Check in</button>`
                 : ''}
               ${['pending', 'confirmed'].includes(booking.status) ? `
-                <div class="booking-tools reschedule-form" data-booking-id="${esc(booking._id)}">
+                                  <div class="booking-tools reschedule-form" data-booking-id="${esc(booking._id)}" data-court="${esc(booking.court?._id || booking.court || '')}" data-date="${manilaDateInputValue(booking.date)}" data-start="${esc(booking.startTime)}">
                   <select class="new-court" aria-label="Court">${courtOptions}</select>
                   <input type="date" class="new-date" aria-label="New date" value="${manilaDateInputValue(booking.date)}" />
-                  <input type="time" class="new-time" aria-label="New time" value="${esc(booking.startTime)}" />
+                                       <select class="new-time" aria-label="New time"><option>Loading times...</option></select>
                   <button type="button" class="secondary reschedule-btn">Reschedule</button>
                   <button type="button" class="danger cancel-btn">Cancel</button>
                 </div>
@@ -209,6 +238,7 @@
             </div>
           </div>`;
       }).join('');
+               el.querySelectorAll('.reschedule-form').forEach(initSlots);
     }
 
     async function loadBookings() {

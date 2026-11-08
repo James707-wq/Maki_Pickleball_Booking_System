@@ -89,7 +89,7 @@ async function validateSlot(court, date, startTime, { excludeBookingId = null, a
   const clashFilter = { court: court._id, date: bookingDate, startTime, status: { $in: ACTIVE_STATUSES } };
   if (excludeBookingId) clashFilter._id = { $ne: excludeBookingId };
   if (await Booking.findOne(clashFilter)) {
-    return fail(409, 'That time slot is already booked');
+           return fail(409, 'That date and time is already booked. Please choose another time or court.');
   }
 
   return {

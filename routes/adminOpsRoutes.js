@@ -10,6 +10,12 @@ const Court = require('../models/Court');
 const Transaction = require('../models/Transaction');
 const Notification = require('../models/Notification');
 const Announcement = require('../models/Announcement');
+   const announceCustomers = async (a, adminId) => {
+     const users = await User.find({ role: 'user', isActive: true }).distinct('_id');
+     if (!users.length) return;
+     const batch = `ann-${Date.now().toString(36)}`;
+     await Notification.insertMany(users.map((user) => ({ user, message: `New announcement: ${a.title}`, sentBy: adminId, batch })));
+   };
 const Promotion = require('../models/Promotion');
 const Feedback = require('../models/Feedback');
 const Issue = require('../models/Issue');
@@ -230,6 +236,7 @@ router.post('/announcements', authorize('announcements'), async (req, res) => {
     const a = await Announcement.create({
       title: req.body.title, body: req.body.body, published, publishedAt: published ? new Date() : undefined, createdBy: req.user._id,
     });
+           if (published) await announceCustomers(a, req.user._id);
     res.status(201).json({ success: true, announcement: a });
   } catch (err) { handleError(res, err); }
 });
@@ -247,13 +254,15 @@ router.patch('/announcements/:id/publish', authorize('announcements'), async (re
   try {
     const a = await Announcement.findById(req.params.id);
     if (!a) return bad(res, 'Announcement not found', 404);
-    a.published = req.body.published === true || req.body.published === 'true';
-    if (a.published) a.publishedAt = new Date();
-    await a.save();
+           const wasPublished = a.published;
+       a.published = req.body.published === true || req.body.published === 'true';
+       if (a.published) a.publishedAt = new Date();
+       await a.save();
+       if (a.published && !wasPublished) await announceCustomers(a, req.user._id);
     res.json({ success: true, announcement: a });
   } catch (err) { handleError(res, err); }
 });
-router.delete('/announcements/:id', authorize('announcements'), async (req, res) => {
+router.delete('/a.publishedannouncements/:id', authorize('announcements'), async (req, res) => {
   try {
     const a = await Announcement.findByIdAndDelete(req.params.id);
     if (!a) return bad(res, 'Announcement not found', 404);

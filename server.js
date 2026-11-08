@@ -11,6 +11,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const connectDB = require('./config/db');
+   const { startReminders } = require('./utils/reminders');
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -60,4 +61,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api', engageRoutes);              // UF-130, UF-131, UF-133, UF-134         // AF-102, AF-105..AF-135
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+   app.listen(PORT, () => {
+     console.log(`Server running on http://localhost:${PORT}`);
+     startReminders(); // 2-hour booking reminders
+   });

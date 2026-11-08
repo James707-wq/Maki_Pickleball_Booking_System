@@ -26,7 +26,7 @@ const bad = (res, message, code = 400) => res.status(code).json({ success: false
 /** UF-130 - GET /api/announcements */
 router.get('/announcements', async (req, res) => {
   try {
-    const items = await Announcement.find({ published: true }).sort({ publishedAt: -1 }).limit(10).select('title body publishedAt');
+    const items = await Announcement.find({ published: true }).sort({ publishedAt: -1 }).limit(50).select('title body publishedAt');
     res.json({ success: true, announcements: items });
   } catch (err) { handleError(res, err); }
 });

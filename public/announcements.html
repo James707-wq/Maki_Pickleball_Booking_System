@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Announcements - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+<style>
+  .ann { padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .ann:last-child { border-bottom: 0; }
+  .ann h2 { margin: 0 0 4px; font-size: 1.05rem; }
+  .ann .meta { color: var(--muted); font-size: .85rem; margin-bottom: 8px; }
+  .ann p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body class="app">
+  <script src="js/nav.js"></script>
+
+  <div class="container" style="max-width: 640px;">
+    <div class="card">
+      <h1 style="margin-top:0;">Announcements</h1>
+      <p class="subtitle">News and updates from MAKI's Pickleball Court.</p>
+      <div id="list"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    (async () => {
+      const list = document.getElementById('list');
+      try {
+        const { announcements } = await apiRequest('/announcements', { auth: true });
+        list.innerHTML = announcements.length ? announcements.map((a) => `
+          <div class="ann">
+            <h2>${esc(a.title)}</h2>
+            <div class="meta">${new Date(a.publishedAt).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+            <p>${esc(a.body)}</p>
+          </div>`).join('') : '<div class="empty">No announcements yet.</div>';
+      } catch (err) {
+        list.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>
