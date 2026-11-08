@@ -1,13 +1,9 @@
 /* One shared navbar for every logged-in page.
    Add or rename a link here and it changes everywhere. */
 (function () {
-  var links = [
+    var links = [
     ['dashboard.html', 'Dashboard'],
     ['courts.html', 'Courts'],
-    ['my-bookings.html', 'My Bookings'],
-    ['booking-status.html', 'Booking Status'],
-    ['feedback.html', 'Feedback'],
-    ['support.html', 'Contact Admin'],
     ['profile.html', 'Profile']
   ];
 
