@@ -1073,7 +1073,7 @@ function removeCourt(c) {
    AF-112  Hours & booking rules
    ===================================================================== */
 async function renderSettings() {
-  setHead('Hours & rules', 'Facility-wide opening hours and how bookings are accepted');
+  setHead('Hours & rules', 'Facility-wide opening hours');
   const { settings: s } = await api('/settings');
   view.innerHTML = `
     <div class="card" style="max-width:640px;"><div class="pad">
@@ -1086,9 +1086,7 @@ async function renderSettings() {
         <label class="check"><input type="checkbox" name="applyToCourts" />
           <span><b>Also apply to every court now</b>New courts always start with these hours. Turn this on to change the courts you already have. It is refused if an upcoming booking would fall outside the new hours.</span></label>
 
-        <h2 style="font-size:15px;margin-top:24px;">Booking approval</h2>
-        <label class="check"><input type="checkbox" name="requireApproval" ${s.requireApproval ? 'checked' : ''} />
-          <span><b>Approve each booking before it is confirmed</b>New bookings wait as "Pending approval" and hold their slot until staff approve or reject them. When off, bookings are confirmed instantly.</span></label>
+        <p style="margin:18px 0 0;color:var(--muted);font-size:13px;">Every new booking waits as "Pending approval" and holds its slot until staff approve or reject it.</p>
 
         <div class="dlg-foot" style="justify-content:flex-start;"><button class="btn primary" type="submit">Save settings</button></div>
         <div class="msg error hidden" role="alert"></div>
@@ -1096,7 +1094,7 @@ async function renderSettings() {
     </div></div>`;
   const form = $('#setForm');
   onSubmit(form, async (data) => {
-    const r = await api('/settings', { method: 'PUT', body: { openTime: data.openTime, closeTime: data.closeTime, requireApproval: data.requireApproval, applyToCourts: data.applyToCourts } });
+    const r = await api('/settings', { method: 'PUT', body: { openTime: data.openTime, closeTime: data.closeTime, applyToCourts: data.applyToCourts } });
     toast(r.updatedCourts ? `Saved. Hours updated on ${r.updatedCourts} court${r.updatedCourts === 1 ? '' : 's'}.` : 'Settings saved');
     form.querySelector('[name=applyToCourts]').checked = false;
   });

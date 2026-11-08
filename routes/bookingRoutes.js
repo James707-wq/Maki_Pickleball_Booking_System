@@ -3,7 +3,6 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Court = require('../models/Court');
-const Settings = require('../models/Settings');
 const Promotion = require('../models/Promotion');
 const { protect } = require('../middleware/auth');
 const U = require('../utils/bookingUtils');
@@ -30,7 +29,7 @@ const generateReferenceNumber = () => {
 /**
  * UF-116 Court Booking / UF-117 Details / UF-120 Reference / UF-121 Payment Status
  * POST /api/bookings   body: { courtId, date, startTime }
- * If the admin turned on "require approval" the booking starts as "pending" (AF-116).
+ * Every new booking starts as "pending" and is confirmed when an admin approves it (AF-116).
  */
 router.get('/', async (req, res) => {
   try {
@@ -106,8 +105,6 @@ router.post('/', async (req, res) => {
     const check = await U.validateSlot(court, date, startTime);
     if (!check.ok) return res.status(check.code).json({ success: false, message: check.message });
 
-    const settings = await Settings.get();
-
     // AF-127: optional promo code. Usage is claimed atomically so a limited promo can't be over-used.
     let totalFee = check.totalFee;
     let discount = 0;
@@ -143,7 +140,7 @@ router.post('/', async (req, res) => {
       discount,
       promoCode,
       paymentStatus: totalFee === 0 ? 'paid' : 'pending', // a 100% promo needs no payment
-      status: settings.requireApproval ? 'pending' : 'confirmed',
+      status: 'pending', // always starts pending; becomes confirmed only when an admin approves it
       });
     } catch (e) {
       if (claimed) await Promotion.updateOne({ _id: claimed._id }, { $inc: { usedCount: -1 } }); // slot taken: give the use back
@@ -152,9 +149,7 @@ router.post('/', async (req, res) => {
 
     await U.notify(
       req.user._id,
-      booking.status === 'pending'
-        ? `Booking ${booking.referenceNumber} received. It will be confirmed once the facility approves it.`
-        : `Booking ${booking.referenceNumber} confirmed for ${court.name} on ${date}, ${startTime}.`
+      `Booking ${booking.referenceNumber} for ${court.name} on ${date}, ${startTime} is pending. It will be confirmed once the facility approves it.`
     );
 
     res.status(201).json({ success: true, booking });
