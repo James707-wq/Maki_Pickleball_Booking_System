@@ -23,6 +23,7 @@ router.get('/', protect, async (req, res) => {
     });
 
     const notifications = await Notification.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(10);
+           const unreadNotifications = await Notification.countDocuments({ user: req.user._id, read: false });
 
     res.json({
       success: true,
@@ -30,7 +31,7 @@ router.get('/', protect, async (req, res) => {
         upcomingBookings,
         totalBookings,
         notifications,
-        unreadNotifications: notifications.filter((n) => !n.read).length,
+                   unreadNotifications,
       },
     });
   } catch (err) {

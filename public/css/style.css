@@ -450,3 +450,11 @@ html { scrollbar-gutter: stable; }               /* buttons never shift when a p
 @media (max-width: 1000px) { .navbar .links a { padding: 8px 8px; font-size: .9rem; } }
 @media (max-width: 760px) { .navbar .links { flex-wrap: nowrap; } }
 @media print { .navbar { display: none !important; } }
+
+
+/* ---------- notifications: unread vs read ---------- */
+.note[data-id] { cursor: pointer; }
+.note[data-id]:not(.read) > div { font-weight: 600; }
+.note.read { opacity: .65; cursor: default; }
+.note.read i { background: #b8c4d6; box-shadow: none; }
+#markAllRead { margin-left: auto; font-size: .78rem; font-weight: 600; }

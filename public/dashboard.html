@@ -56,7 +56,7 @@
         <div id="bookingsList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
       </section>
       <section class="card panel">
-        <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>Notifications</h2>
+           <h2 style="justify-content:flex-start;"></h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>   Notifications<a href="#" id="markAllRead" hidden>Mark all read</a></h2>
         <div id="notificationsList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
       </section>
     </div>
@@ -68,6 +68,30 @@
     (() => { const h = new Date(Date.now() + 8*3600e3).getUTCHours(); document.getElementById('greeting').textContent = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; })();
     document.getElementById('logoutBtn').addEventListener('click', logout);
 
+       // Notifications: clicking one marks it read and lowers the unread count
+    function setUnread(n) {
+      document.getElementById('unreadCount').textContent = Math.max(n, 0);
+      document.getElementById('markAllRead').hidden = n <= 0;
+    }
+    document.getElementById('notificationsList').addEventListener('click', async (e) => {
+      const row = e.target.closest('.note[data-id]');
+      if (!row || row.classList.contains('read')) return;
+      try {
+        await apiRequest(`/notifications/${row.dataset.id}/read`, { method: 'PATCH', auth: true });
+        row.classList.add('read');
+        row.removeAttribute('title');
+        setUnread(Number(document.getElementById('unreadCount').textContent) - 1);
+      } catch (err) { /* leave it unread */ }
+    });
+    document.getElementById('markAllRead').addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await apiRequest('/notifications/read-all', { method: 'PATCH', auth: true });
+        document.querySelectorAll('#notificationsList .note').forEach((n) => { n.classList.add('read'); n.removeAttribute('title'); });
+        setUnread(0);
+      } catch (err) { /* ignore */ }
+    }); 
+    
     async function loadDashboard() {
       try {
         const profile = await apiRequest('/users/profile', { auth: true });
@@ -95,11 +119,12 @@
             }).join('')
           : '<div class="empty-state">No upcoming bookings yet.<br><a href="courts.html" class="btn cta">Find a court</a></div>';
 
-        const notifEl = document.getElementById('notificationsList');
+                const notifEl = document.getElementById('notificationsList');
         notifEl.innerHTML = notifications.length
           ? notifications.map(n => `
-              <div class="note"><i></i><div>${esc(n.message)}<small>${new Date(n.createdAt).toLocaleString()}</small></div></div>`).join('')
+              <div class="note${n.read ? ' read' : ''}" data-id="${esc(n._id)}" title="${n.read ? '' : 'Click to mark as read'}"><i></i><div>${esc(n.message)}<small>${new Date(n.createdAt).toLocaleString()}</small></div></div>`).join('')
           : '<div class="empty-state">You are all caught up.</div>';
+        setUnread(unreadNotifications);
 
         if (upcomingBookings.length) {
           const n = upcomingBookings[0];
