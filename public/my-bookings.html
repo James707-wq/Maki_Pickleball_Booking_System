@@ -8,6 +8,8 @@
   <link rel="icon" type="image/png" href="img/favicon-32.png" />
   <meta name="theme-color" content="#0a325e" />
   <style>
+    
+           .pill.bad { background: #fbe4e4; color: #9b2226; }
     .booking-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     .status-modal-backdrop {
       position: fixed; inset: 0; background: rgba(10, 50, 94, 0.6); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
@@ -171,7 +173,7 @@
       }
 
       el.innerHTML = bookings.map((booking) => {
-        const statusClass = ['cancelled', 'rejected'].includes(booking.status) ? 'warn' : 'ok';
+          const statusClass = ['cancelled', 'rejected'].includes(booking.status) ? 'bad' : booking.status === 'pending' ? '' : 'ok';
         const courtOptions = COURTS.map((court) => `
           <option value="${esc(court._id)}" ${String(booking.court?._id || booking.court || '') === String(court._id) ? 'selected' : ''}>${esc(court.name)}</option>
         `).join('');

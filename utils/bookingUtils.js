@@ -31,12 +31,29 @@ const slotStarts = (open, close, step) => {
   return out;
 };
 
-/** Marks confirmed bookings whose time has passed as completed. */
+/**
+ * Housekeeping, run whenever bookings are listed:
+ *  - confirmed bookings whose time has passed become "completed"
+ *  - pending bookings nobody approved before their time become "cancelled"
+ */
 async function autoCompleteBookings(extra = {}) {
   const now = new Date();
   const candidates = await Booking.find({ status: 'confirmed', date: { $lte: now }, ...extra }).select('date endTime');
   const ids = candidates.filter((b) => endInstant(b) <= now).map((b) => b._id);
   if (ids.length) await Booking.updateMany({ _id: { $in: ids } }, { status: 'completed' });
+
+  const stale = await Booking.find({ status: 'pending', date: { $lte: now }, ...extra }).select('date endTime user referenceNumber');
+  const staleBookings = stale.filter((b) => endInstant(b) <= now);
+  if (staleBookings.length) {
+    const reason = 'Not approved before the booking time';
+    await Booking.updateMany(
+      { _id: { $in: staleBookings.map((b) => b._id) }, status: 'pending' },
+      { status: 'cancelled', statusReason: reason, statusChangedAt: now, slotActive: false }
+    );
+    for (const b of staleBookings) {
+      await notify(b.user, `Your booking ${b.referenceNumber} expired because it was not approved before the booking time.`);
+    }
+  }
 }
 
 const fail = (code, message) => ({ ok: false, code, message });

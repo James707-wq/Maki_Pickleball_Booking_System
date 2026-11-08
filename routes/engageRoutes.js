@@ -38,6 +38,12 @@ router.get('/notifications', async (req, res) => {
     res.json({ success: true, notifications, unread: notifications.filter((n) => !n.read).length });
   } catch (err) { handleError(res, err); }
 });
+router.patch('/notifications/read-all', async (req, res) => {
+  try {
+    await Notification.updateMany({ user: req.user._id, read: false }, { read: true });
+    res.json({ success: true });
+  } catch (err) { handleError(res, err); }
+});
 
 router.patch('/notifications/:id/read', async (req, res) => {
   try {
