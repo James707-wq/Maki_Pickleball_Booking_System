@@ -613,7 +613,7 @@ function showBooking(b) {
       const r = await api(`/bookings/${b._id}${path}`, { method: 'PATCH', body });
       toast(okText);
       changed();
-      showBooking(r.booking);
+           if (path === '/status') closeModal(); else showBooking(r.booking);
       return r;
     } catch (ex) { err(ex.message); return null; }
   };
