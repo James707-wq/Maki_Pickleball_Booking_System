@@ -397,15 +397,15 @@ body.app .skeleton i, body.app .skel-card { background: linear-gradient(100deg, 
 .dashboard-page .bk .pill { white-space: normal; text-align: center; }
 .dashboard-page .panel h2 { min-width: 0; gap: 8px; }
 .dashboard-page .panel h2 a { flex: none; }
-.dashboard-page .dashboard-nav .links { scrollbar-width: thin; }
+.navbar .links { scrollbar-width: thin; }
 
 @media (max-width: 760px) {
-  .dashboard-page .dashboard-nav .links {
+  .navbar .links {
     width: 100%; justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
-  .dashboard-page .dashboard-nav .links::-webkit-scrollbar { display: none; }
-  .dashboard-page .dashboard-nav .links a { flex: 0 0 auto; padding: 9px 12px; white-space: nowrap; }
+  .navbar .links::-webkit-scrollbar { display: none; }
+  .navbar .links a { flex: 0 0 auto; padding: 9px 12px; white-space: nowrap; }
   .dashboard-page .stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .dashboard-page .stat-tile { gap: 10px; padding: 14px; }
 }
@@ -437,6 +437,16 @@ body.app .skeleton i, body.app .skel-card { background: linear-gradient(100deg, 
 
 @media (max-width: 380px) {
   .dashboard-page .quick { grid-template-columns: 1fr; }
-  .dashboard-page .dashboard-nav .brand .wm b { font-size: .95rem; }
-  .dashboard-page .dashboard-nav .links a { padding-inline: 10px; font-size: .82rem; }
+  .navbar .brand .wm b { font-size: .95rem; }
+  .navbar .links a { padding-inline: 10px; font-size: .82rem; }
 }
+
+
+/* ---------- consistent navigation ---------- */
+html { scrollbar-gutter: stable; }               /* buttons never shift when a page gets a scrollbar */
+.navbar { min-height: 60px; box-sizing: border-box; flex-wrap: wrap; }
+.navbar .links { flex-wrap: wrap; justify-content: flex-end; }
+.navbar .links a { white-space: nowrap; }
+@media (max-width: 1000px) { .navbar .links a { padding: 8px 8px; font-size: .9rem; } }
+@media (max-width: 760px) { .navbar .links { flex-wrap: nowrap; } }
+@media print { .navbar { display: none !important; } }

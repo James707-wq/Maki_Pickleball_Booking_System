@@ -46,7 +46,7 @@ const BookingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'],
-      default: 'confirmed',
+      default: 'pending',
     },
     statusReason: { type: String, trim: true, default: '' }, // AF-117 cancellation / rejection reason
     statusChangedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

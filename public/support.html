@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Help &amp; Support - MAKI's PickleBall Court</title>
+<title>Contact Admin - MAKI's PickleBall Court</title>
 <link rel="stylesheet" href="css/style.css" />
 <link rel="icon" type="image/png" href="img/favicon-32.png" />
 <link rel="apple-touch-icon" href="img/favicon.png" />
@@ -22,23 +22,12 @@
 </style>
 </head>
 <body class="app">
-  <div class="navbar">
-    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
-      <img src="img/logo-mark.png" alt="" />
-      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
-    </a>
-    <div class="links">
-      <a href="dashboard.html">Dashboard</a>
-      <a href="courts.html">Courts</a>
-      <a href="profile.html">Profile</a>
-      <a href="#" id="logoutBtn">Log out</a>
-    </div>
-  </div>
+  <script src="js/nav.js"></script>
 
   <div class="container" style="max-width: 640px;">
     <div class="card">
-      <h1 style="margin-top:0;">Report a problem</h1>
-      <p class="subtitle">Something wrong with a court, a booking or a payment? Tell us and we'll reply here.</p>
+      <h1 style="margin-top:0;">Contact the admin</h1>
+      <p class="subtitle">Something wrong with a court, a booking or a payment? Message the admin and the reply will show up here. To rate a visit, use <a href="feedback.html">Feedback &amp; Ratings</a>.</p>
       <form id="issueForm">
         <label for="cat">What is it about?</label>
         <select id="cat">
@@ -49,13 +38,13 @@
         <input id="subject" maxlength="120" placeholder="e.g. Net on Court 2 is torn" required />
         <label for="message">What happened?</label>
         <textarea id="message" rows="4" maxlength="2000" required></textarea>
-        <button type="submit" class="cta">Send report</button>
+        <button type="submit" class="cta">Send message</button>
         <div id="formMsg" class="msg"></div>
       </form>
     </div>
 
     <div class="card" style="margin-top:20px;">
-      <h1 style="margin-top:0;font-size:1.2rem;">My reports</h1>
+      <h1 style="margin-top:0;font-size:1.2rem;">My messages to the admin</h1>
       <div id="list"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
     </div>
 
@@ -83,7 +72,7 @@
             <p>${esc(i.message)}</p>
             ${i.replies.length ? `<div class="thread">${i.replies.map((r) => `<div class="${r.byRole === 'user' ? '' : 'staff'}"><b>${r.byRole === 'user' ? 'You' : esc(r.byName || 'Facility')}</b> <span style="color:var(--muted);font-size:.8rem;">${esc(when(r.at))}</span><div style="white-space:pre-wrap;">${esc(r.message)}</div></div>`).join('')}</div>` : ''}
             <form class="reply-form"><input placeholder="Write back…" maxlength="2000" aria-label="Reply" required /><button type="submit" class="secondary">Send</button></form>
-          </div>`).join('') : '<div class="empty">You have not reported anything. Hopefully all is well! 🎾</div>';
+          </div>`).join('') : '<div class="empty">You have not contacted the admin. Hopefully all is well! 🎾</div>';
       } catch (err) { el.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
     }
 
@@ -104,7 +93,7 @@
         await apiRequest('/issues', { method: 'POST', auth: true, body: {
           category: document.getElementById('cat').value, subject: document.getElementById('subject').value, message: document.getElementById('message').value } });
         e.target.reset();
-        showMsg(msg, 'Thanks! We got your report and will reply here.', 'success');
+        showMsg(msg, 'Thanks! The admin got your message and will reply here.', 'success');
         load();
       } catch (err) { showMsg(msg, err.message); }
     });

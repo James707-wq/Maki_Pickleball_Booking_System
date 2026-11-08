@@ -20,19 +20,7 @@
 </style>
 </head>
 <body class="app">
-  <div class="navbar no-print">
-    <a class="brand" href="dashboard.html" aria-label="MAKI's Pickleball Court home">
-      <img src="img/logo-mark.png" alt="" />
-      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
-    </a>
-    <div class="links">
-      <a href="dashboard.html">Dashboard</a>
-      <a href="courts.html">Courts</a>
-      <a href="my-bookings.html">My Bookings</a>
-      <a href="profile.html">Profile</a>
-      <a href="#" id="logoutBtn">Log out</a>
-    </div>
-  </div>
+  <script src="js/nav.js"></script>
 
   <div class="container" style="max-width: 480px;">
     <div class="card">
@@ -122,40 +110,12 @@
       });
     }
 
-    // UF-133: rate a completed booking (once)
-    async function renderReview(b) {
+    // Rating lives on its own page now
+    function renderReview(b) {
       const box = document.getElementById('reviewSection');
-      if (b.status !== 'completed') { box.innerHTML = ''; return; }
-      let existing = null;
-      try { existing = (await apiRequest(`/feedback/booking/${bookingId}`, { auth: true })).feedback; } catch (e) { /* show the form anyway */ }
-      if (existing) {
-        box.innerHTML = `<div class="receipt" style="margin-top:16px;"><strong>Thanks for your feedback!</strong><div style="color:#e0a800;font-size:1.2rem;">${'★'.repeat(existing.rating)}<span style="color:#d3dae6;">${'★'.repeat(5 - existing.rating)}</span></div>${existing.comment ? `<p style="margin:6px 0 0;">${esc(existing.comment)}</p>` : ''}</div>`;
-        return;
-      }
-      box.innerHTML = `
-        <form id="reviewForm" class="receipt" style="margin-top:16px;">
-          <strong>How was your game?</strong>
-          <div id="starPick" role="radiogroup" aria-label="Rating" style="font-size:2rem;line-height:1;margin:6px 0;cursor:pointer;user-select:none;"></div>
-          <textarea id="fbText" rows="3" maxlength="1000" placeholder="Tell us about the court and facilities (optional)"></textarea>
-          <button type="submit" class="cta" style="margin-top:10px;">Send feedback</button>
-          <div id="fbMsg" class="msg"></div>
-        </form>`;
-      let rating = 0;
-      const pick = document.getElementById('starPick');
-      const paint = () => { pick.innerHTML = [1, 2, 3, 4, 5].map((n) => `<span role="radio" aria-checked="${rating === n}" aria-label="${n} star${n > 1 ? 's' : ''}" tabindex="0" data-n="${n}" style="color:${n <= rating ? '#e0a800' : '#d3dae6'};">★</span>`).join(''); };
-      paint();
-      const choose = (el) => { if (el && el.dataset.n) { rating = Number(el.dataset.n); paint(); } };
-      pick.addEventListener('click', (e) => choose(e.target));
-      pick.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(e.target); } });
-      document.getElementById('reviewForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const msg = document.getElementById('fbMsg');
-        if (!rating) return showMsg(msg, 'Tap a star to rate your visit');
-        try {
-          await apiRequest('/feedback', { method: 'POST', auth: true, body: { bookingId, rating, comment: document.getElementById('fbText').value } });
-          renderReview(b);
-        } catch (err) { showMsg(msg, err.message); }
-      });
+      box.innerHTML = b.status === 'completed'
+        ? `<div class="receipt" style="margin-top:16px;"><strong>How was your game?</strong><p style="margin:6px 0 0;"><a href="feedback.html?booking=${encodeURIComponent(b._id)}">Rate this visit in Feedback &amp; Ratings</a></p></div>`
+        : '';
     }
 
     loadBooking();

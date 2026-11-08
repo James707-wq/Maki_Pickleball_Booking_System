@@ -91,6 +91,14 @@ router.post('/feedback', async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+router.get('/feedback/mine', async (req, res) => {
+  try {
+    const feedback = await Feedback.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(100)
+      .populate('booking', 'referenceNumber date startTime endTime');
+    res.json({ success: true, feedback });
+  } catch (err) { handleError(res, err); }
+});
+
 router.get('/feedback/booking/:id', async (req, res) => {
   try {
     const fb = await Feedback.findOne({ booking: req.params.id, user: req.user._id });
