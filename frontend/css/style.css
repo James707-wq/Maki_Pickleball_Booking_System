@@ -398,7 +398,6 @@ body.app .skeleton i, body.app .skel-card { background: linear-gradient(100deg, 
 .dashboard-page .bk .pill { white-space: normal; text-align: center; }
 .dashboard-page .panel h2 { min-width: 0; gap: 8px; }
 .dashboard-page .panel h2 a { flex: none; }
-<<<<<<< HEAD:frontend/css/style.css
 body.app .navbar .links { scrollbar-width: thin; }
 
 @media (max-width: 760px) {
@@ -408,17 +407,6 @@ body.app .navbar .links { scrollbar-width: thin; }
   }
   body.app .navbar .links::-webkit-scrollbar { display: none; }
   body.app .navbar .links a { flex: 0 0 auto; padding: 9px 12px; white-space: nowrap; }
-=======
-.navbar .links { scrollbar-width: thin; }
-
-@media (max-width: 760px) {
-  .navbar .links {
-    width: 100%; justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain;
-    scrollbar-width: none; -webkit-overflow-scrolling: touch;
-  }
-  .navbar .links::-webkit-scrollbar { display: none; }
-  .navbar .links a { flex: 0 0 auto; padding: 9px 12px; white-space: nowrap; }
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/css/style.css
   .dashboard-page .stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .dashboard-page .stat-tile { gap: 10px; padding: 14px; }
 }
@@ -450,7 +438,6 @@ body.app .navbar .links { scrollbar-width: thin; }
 
 @media (max-width: 380px) {
   .dashboard-page .quick { grid-template-columns: 1fr; }
-<<<<<<< HEAD:frontend/css/style.css
   body.app .navbar .brand .wm b { font-size: .95rem; }
   body.app .navbar .links a { padding-inline: 10px; font-size: .82rem; }
 }
@@ -557,10 +544,6 @@ button:disabled { opacity: .75; cursor: progress; }
 .wx-day.maybe { background: #fff7e0; } .wx-day.maybe em { color: #7a5600; }
 .wx-day.wet { background: #fdecea; } .wx-day.wet em { color: #a12a2a; }
 @media (max-width: 560px) { .wx-days { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-=======
-  .navbar .brand .wm b { font-size: .95rem; }
-  .navbar .links a { padding-inline: 10px; font-size: .82rem; }
-}
 
 
 /* ---------- consistent navigation ---------- */
@@ -579,4 +562,3 @@ html { scrollbar-gutter: stable; }               /* buttons never shift when a p
 .note.read { opacity: .65; cursor: default; }
 .note.read i { background: #b8c4d6; box-shadow: none; }
 #markAllRead { margin-left: auto; font-size: .78rem; font-weight: 600; }
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/css/style.css

@@ -5,12 +5,9 @@ const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
 const handleError = require('../utils/handleError');
 const auditSecurityEvent = require('../utils/securityAudit');
-<<<<<<< HEAD:backend/routes/authRoutes.js
 const { verifyTurnstile } = require('../utils/integrations/turnstile');
 const { verifyGoogleIdToken } = require('../utils/integrations/google');
-=======
 const L = require('../utils/loginSecurity');
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/authRoutes.js
 
 // txRouter: write routes run as timestamped transactions (abort + restart on conflict)
 const router = require('../utils/concurrency').txRouter(express.Router());
@@ -43,20 +40,13 @@ router.post('/register', async (req, res) => {
 /** UF-102 User Login - POST /api/auth/login */
 router.post('/login', async (req, res) => {
   try {
-<<<<<<< HEAD:backend/routes/authRoutes.js
     const human = await verifyTurnstile(req.body.captchaToken, req.ip);
     if (!human.ok) return res.status(400).json({ success: false, message: human.message });
-    const { user, code, message } = await checkCredentials(req.body.email, req.body.password);
-    if (!user) {
-      auditSecurityEvent(req, { action: 'Failed customer sign-in', statusCode: code });
-      return res.status(code).json({ success: false, message });
-=======
     const result = await L.checkCredentials(req.body.email, req.body.password);
     if (result.code) {
       if (result.reason) L.recordAttempt(req, { portal: 'customer', success: false, reason: result.reason, user: result.user, email: req.body.email });
       auditSecurityEvent(req, { action: 'Failed customer sign-in', user: result.user, detail: result.reason || '', statusCode: result.code });
       return res.status(result.code).json({ success: false, message: result.message });
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/authRoutes.js
     }
     const { user } = result;
     await L.registerSuccess(user, req);
@@ -71,20 +61,13 @@ router.post('/login', async (req, res) => {
 /** AF-101 Admin Login - POST /api/auth/admin-login (staff and admin accounts only) */
 router.post('/admin-login', async (req, res) => {
   try {
-<<<<<<< HEAD:backend/routes/authRoutes.js
     const human = await verifyTurnstile(req.body.captchaToken, req.ip); // Cloudflare Turnstile, when set up
     if (!human.ok) return res.status(400).json({ success: false, message: human.message });
-    const { user, code, message } = await checkCredentials(req.body.email, req.body.password);
-    if (!user) {
-      auditSecurityEvent(req, { action: 'Failed admin sign-in', statusCode: code });
-      return res.status(code).json({ success: false, message });
-=======
     const result = await L.checkCredentials(req.body.email, req.body.password);
     if (result.code) {
       if (result.reason) L.recordAttempt(req, { portal: 'admin', success: false, reason: result.reason, user: result.user, email: req.body.email });
       auditSecurityEvent(req, { action: 'Failed admin sign-in', user: result.user, detail: result.reason || '', statusCode: result.code });
       return res.status(result.code).json({ success: false, message: result.message });
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/authRoutes.js
     }
     const { user } = result;
     if (!['staff', 'admin'].includes(user.role)) {

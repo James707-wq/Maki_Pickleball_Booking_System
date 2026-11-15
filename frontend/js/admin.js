@@ -58,18 +58,12 @@ async function request(url, { method = 'GET', body, version } = {}) {
   let data = {};
   try { data = await res.json(); } catch (e) { /* non-JSON */ }
   if (res.status === 401) { signOut(); throw new Error(data.message || 'Session expired'); }
-<<<<<<< HEAD:frontend/js/admin.js
-  if (!res.ok || data.success === false) throw Object.assign(new Error(data.message || 'Something went wrong'), { status: res.status, data });
-=======
   if (!res.ok || data.success === false) {
-    const err = new Error(data.message || 'Something went wrong');
-    err.status = res.status;
-    err.code = data.code;
+    const err = Object.assign(new Error(data.message || 'Something went wrong'), { status: res.status, code: data.code, data });
     // someone else changed this record: reload the list behind the dialog so it shows the latest data
     if (data.code === 'WRITE_CONFLICT') setTimeout(() => { try { refreshView(); } catch (e) { /* no list */ } }, 0);
     throw err;
   }
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/js/admin.js
   return data;
 }
 const api = (path, opts) => request(`${window.API_ROOT || '/api'}/admin${path}`, opts);
@@ -222,17 +216,12 @@ const NAV = [
     { label: 'Revenue analytics', route: 'analytics', href: '#/analytics?tab=revenue', q: { tab: 'revenue' }, perm: 'analytics', title: 'Revenue Analytics', kw: 'income money earnings sales' },
     { label: 'User analytics', route: 'analytics', href: '#/analytics?tab=users', q: { tab: 'users' }, perm: 'analytics', title: 'User Analytics', kw: 'customers signups registered active repeat' },
   ] },
-<<<<<<< HEAD:frontend/js/admin.js
   { label: 'Integrations', icon: 'integrations', route: 'integrations', perm: 'settings', title: 'Integrations and API settings', kw: 'api google sign in calendar hitpay gcash qrph qr ph card grabpay shopeepay turnstile captcha map weather on off switch keys pin otp code two-step 2fa' },
-  { label: 'Audit logs', icon: 'audit', route: 'audit', perm: 'audit', title: 'Audit Logs', kw: 'history activity log who changed monitoring security' },
-  { label: 'My account', icon: 'profile', route: 'profile', perm: 'dashboard', title: 'Profile, password and security PIN', kw: 'profile password change name phone security pin' },
-=======
-    { group: 'security', label: 'Security', icon: 'logins', children: [
+  { group: 'security', label: 'Security', icon: 'logins', children: [
     { label: 'Login security', route: 'logins', perm: 'logins', title: 'Login history and account lockouts', kw: 'login sign in signed who failed password attempts locked lockout unlock ip suspicious brute force' },
     { label: 'Audit logs', route: 'audit', perm: 'audit', title: 'Audit Logs', kw: 'history activity log who changed monitoring security' },
   ] },
-  { label: 'My account', icon: 'profile', route: 'profile', perm: 'dashboard', title: 'Profile and Change Password', kw: 'profile password change name phone security' },
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/js/admin.js
+  { label: 'My account', icon: 'profile', route: 'profile', perm: 'dashboard', title: 'Profile, password and security PIN', kw: 'profile password change name phone security pin' },
 ];
 
 const NAV_KEY = 'adminNavCollapsed';
@@ -1165,11 +1154,7 @@ function removeCourt(c) {
    AF-112  Hours & booking rules
    ===================================================================== */
 async function renderSettings() {
-<<<<<<< HEAD:frontend/js/admin.js
   setHead('Hours & rules', 'Facility-wide opening hours, location and how bookings are accepted');
-=======
-  setHead('Hours & rules', 'Facility-wide opening hours');
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/js/admin.js
   const { settings: s } = await api('/settings');
   const hasPin = s.facilityLat != null && s.facilityLng != null;
   view.innerHTML = `
@@ -1183,7 +1168,6 @@ async function renderSettings() {
         <label class="check"><input type="checkbox" name="applyToCourts" />
           <span><b>Also apply to every court now</b>New courts always start with these hours. Turn this on to change the courts you already have. It is refused if an upcoming booking would fall outside the new hours.</span></label>
 
-<<<<<<< HEAD:frontend/js/admin.js
         <h2 style="font-size:15px;margin-top:24px;">Facility location</h2>
         <p class="sub" style="margin:4px 0 8px;">Customers see this pin on a "Find us" map with directions, and the weather forecast uses it. Search for the address, use your current location, or click the map.</p>
         <div id="facStatus" class="msg ${hasPin ? 'ok' : 'note'}" style="margin:0 0 8px;">${hasPin
@@ -1204,9 +1188,6 @@ async function renderSettings() {
 
         <h2 style="font-size:15px;margin-top:24px;">Booking approval</h2>
         <p class="sub" style="margin:4px 0 0;">Every new booking waits as "Pending approval" and holds its slot until staff approve or reject it under <a href="#/bookings?status=pending">Waiting for approval</a>. A customer who reschedules goes back to pending too.</p>
-=======
-        <p style="margin:18px 0 0;color:var(--muted);font-size:13px;">Every new booking waits as "Pending approval" and holds its slot until staff approve or reject it.</p>
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/js/admin.js
 
         <div class="dlg-foot" style="justify-content:flex-start;"><button class="btn primary" type="submit">Save settings</button></div>
         <div class="msg error hidden" role="alert"></div>
@@ -1226,15 +1207,11 @@ async function renderSettings() {
     } else initFacilityMap(hasPin ? [s.facilityLat, s.facilityLng] : null);
   });
   onSubmit(form, async (data) => {
-<<<<<<< HEAD:frontend/js/admin.js
     const r = await api('/settings', { method: 'PUT', body: {
       openTime: data.openTime, closeTime: data.closeTime, applyToCourts: data.applyToCourts,
       facilityLat: data.facilityLat.trim(), facilityLng: data.facilityLng.trim(), facilityAddress: data.facilityAddress,
-    } });
-=======
-    const r = await api('/settings', { method: 'PUT', body: { openTime: data.openTime, closeTime: data.closeTime, applyToCourts: data.applyToCourts }, version: s.writeTS });
-    s.writeTS = r.settings.writeTS; // the form stays open: the next save builds on this version
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/js/admin.js
+    }, version: s.writeTS });
+    if (r.settings) s.writeTS = r.settings.writeTS; // the form stays open: the next save builds on this version
     toast(r.updatedCourts ? `Saved. Hours updated on ${r.updatedCourts} court${r.updatedCourts === 1 ? '' : 's'}.` : 'Settings saved');
     const pinned = r.settings && r.settings.facilityLat != null;
     const st = $('#facStatus');

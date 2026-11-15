@@ -700,16 +700,12 @@ router.patch('/bookings/:id/status', authorize('bookings'), async (req, res) => 
     booking.statusReason = willBeActive ? '' : reason;
     booking.statusChangedBy = req.user._id;
     booking.statusChangedAt = new Date();
-<<<<<<< HEAD:backend/routes/adminRoutes.js
-    await booking.save();
-=======
     await booking.save(); // conditional on the booking's W-TS
 
     if (!wasActive && willBeActive) {
       // the slot check above must still hold: nobody blocked/booked/closed it in between
       await U.commitScheduleOrUndo(booking.court, () => Booking.updateOne({ _id: booking._id, writeTS: booking.writeTS }, { $set: before }));
     }
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/adminRoutes.js
 
     const ref = booking.referenceNumber;
     const messages = {

@@ -62,27 +62,22 @@ const BookingSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'],
-<<<<<<< HEAD:backend/models/Booking.js
       default: 'pending', // every booking waits for staff approval
-=======
-      default: 'pending',
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:models/Booking.js
     },
     statusReason: { type: String, trim: true, default: '' }, // AF-117 cancellation / rejection reason
     statusChangedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     statusChangedAt: { type: Date },
-    slotActive: { type: Boolean, default: true }, // derived; backs the unique slot 
-           reminderSentAt: { type: Date },               // 2-hour reminder already sent
+    slotActive: { type: Boolean, default: true }, // derived; backs the unique slot index
   },
   { timestamps: true }
 );
 
-   BookingSchema.pre('validate', function (next) {
-     this.slotActive = ACTIVE.includes(this.status);
-     // moved to a new date/time -> the new time gets its own reminder
-     if (!this.isNew && (this.isModified('date') || this.isModified('startTime'))) this.reminderSentAt = undefined;
-     next();
-   });
+BookingSchema.pre('validate', function (next) {
+  this.slotActive = ACTIVE.includes(this.status);
+  // moved to a new date/time -> the new time gets its own reminder
+  if (!this.isNew && (this.isModified('date') || this.isModified('startTime'))) this.reminderSentAt = undefined;
+  next();
+});
 
 // Keep Google Calendar in step with every change to when/where/whether a booking happens.
 const CALENDAR_FIELDS = ['status', 'date', 'startTime', 'endTime', 'court', 'courtName'];

@@ -22,11 +22,7 @@
 </style>
 </head>
 <body class="app">
-<<<<<<< HEAD:frontend/support.html
   <div class="navbar" data-nav="app"></div>
-=======
-  <script src="js/nav.js"></script>
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/support.html
 
   <div class="container" style="max-width: 640px;">
     <div class="card">
@@ -42,12 +38,8 @@
         <input id="subject" maxlength="120" placeholder="e.g. Net on Court 2 is torn" required />
         <label for="message">What happened?</label>
         <textarea id="message" rows="4" maxlength="2000" required></textarea>
-<<<<<<< HEAD:frontend/support.html
         <div id="issueCaptcha" class="captcha"></div>
-        <button type="submit" class="cta" id="issueBtn">Send report</button>
-=======
-        <button type="submit" class="cta">Send message</button>
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/support.html
+        <button type="submit" class="cta" id="issueBtn">Send message</button>
         <div id="formMsg" class="msg"></div>
       </form>
     </div>
@@ -117,7 +109,7 @@
         load();
       } catch (err) { showMsg(msg, err.message); }
       issueCaptcha.reset(); // a check token works only once
-      btn.disabled = false; btn.textContent = 'Send report';
+      btn.disabled = false; btn.textContent = 'Send message';
     });
 
     load();

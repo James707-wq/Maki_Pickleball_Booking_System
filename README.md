@@ -176,30 +176,18 @@ The matrix lives in `backend/config/permissions.js` and is shown on the Roles & 
 ## Project structure
 ```
 makis-pickleball/
-<<<<<<< HEAD
 ├── backend/
 │   ├── server.js            # API server and frontend static-file host
 │   ├── config/              # MongoDB connection and permissions
 │   ├── models/              # MongoDB models
 │   ├── middleware/          # JWT protection, role checks, audit
 │   ├── routes/              # API routes
-│   ├── utils/               # shared backend helpers
+│   ├── utils/               # shared backend helpers (concurrency.js: timestamp concurrency control)
+│   ├── tests/               # npm test - concurrency control tests
 │   ├── scripts/             # database/admin utilities
 │   └── package.json         # backend dependencies and commands
 └── frontend/                # customer pages, admin pages, CSS, JS, images
     └── js/config.js         # API_URL: backend origin (empty = same origin)
-=======
-├── server.js               # entry point
-├── config/db.js            # MongoDB connection
-├── config/permissions.js   # role -> feature access (admin / staff / user)
-├── models/                 # User, Court, Booking, BlockedSlot, Settings, Notification
-├── middleware/auth.js      # JWT protection + role check (authorize)
-├── routes/                 # auth, user, dashboard, court, booking, admin
-├── utils/                  # bookingUtils (slot rules), concurrency (timestamp CC), handleError, sendEmail
-├── tests/                  # npm test - concurrency control tests
-├── scripts/                # seedCourts.js, createAdmin.js
-└── public/                 # customer pages + admin-login.html, admin.html
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c
 ```
 
 ## Setup
@@ -272,15 +260,14 @@ db.bookings.dropIndexes()   // the server rebuilds the correct unique index on n
 ```
 Or, if the data is only for testing: `db.bookings.drop()`.
 
-<<<<<<< HEAD
 Security PINs need no migration: the first time each admin flips an integration switch, they are asked to create one.
-=======
+
 ## Concurrency control (timestamp-based)
 
 Many people use the system at once: customers book and cancel, staff approve, reschedule and record
 payments, and background jobs complete, expire and remind bookings. The database is protected with
 **timestamp-based concurrency control**, a validation-based (optimistic) form of the timestamp
-ordering protocol. Code: `utils/concurrency.js`. Tests: `npm test`.
+ordering protocol. Code: `backend/utils/concurrency.js`. Tests: `npm --prefix backend test`.
 
 ### The timestamps
 | Name | Where | Meaning |
@@ -335,7 +322,7 @@ Booking-only changes to a court's schedule do **not** change the court's W-TS, s
 
 ### Existing databases
 Nothing to migrate: records without `writeTS` are treated as version `null` and still validated. To give old
-records their own version anyway, run `npm run backfill:writets` once.
+records their own version anyway, run `npm --prefix backend run backfill:writets` once.
 
 ### Limits
 - Timestamps are strictly ordered within one server process. With several Node processes, the atomic
@@ -343,7 +330,6 @@ records their own version anyway, run `npm run backfill:writets` once.
 - Several customers booking the same court at the same instant are serialised through its schedule
   timestamp. After 3 failed attempts the customer sees "Please try again". That's fine for a facility's
   traffic, but very high contention would need MongoDB multi-document transactions (replica set) instead.
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c
 
 ## Notes / next steps
 - Booking is now live end-to-end: pick a slot on `court-details.html` →

@@ -201,56 +201,26 @@
         e.preventDefault();
         const msg = document.getElementById('payMsg');
         try {
-          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
+          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, version: b.writeTS, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
           renderPayment(r.booking);
-        } catch (err) { showMsg(msg, err.message); }
-      });
-    }
-
-    // UF-133: rate a completed booking (once)
-    async function renderReview(b) {
-      const box = document.getElementById('reviewSection');
-      if (b.status !== 'completed') { box.innerHTML = ''; return; }
-      let existing = null;
-      try { existing = (await apiRequest(`/feedback/booking/${bookingId}`, { auth: true })).feedback; } catch (e) { /* show the form anyway */ }
-      if (existing) {
-        box.innerHTML = `<div class="receipt" style="margin-top:16px;"><strong>Thanks for your feedback!</strong><div style="color:#e0a800;font-size:1.2rem;">${'★'.repeat(existing.rating)}<span style="color:#d3dae6;">${'★'.repeat(5 - existing.rating)}</span></div>${existing.comment ? `<p style="margin:6px 0 0;">${esc(existing.comment)}</p>` : ''}</div>`;
-        return;
-      }
-      box.innerHTML = `
-        <form id="reviewForm" class="receipt" style="margin-top:16px;">
-          <strong>How was your game?</strong>
-          <div id="starPick" role="radiogroup" aria-label="Rating" style="font-size:2rem;line-height:1;margin:6px 0;cursor:pointer;user-select:none;"></div>
-          <textarea id="fbText" rows="3" maxlength="1000" placeholder="Tell us about the court and facilities (optional)"></textarea>
-          <div id="fbCaptcha" class="captcha"></div>
-          <button type="submit" class="cta" style="margin-top:10px;">Send feedback</button>
-          <div id="fbMsg" class="msg"></div>
-        </form>`;
-      let rating = 0;
-      const pick = document.getElementById('starPick');
-      const paint = () => { pick.innerHTML = [1, 2, 3, 4, 5].map((n) => `<span role="radio" aria-checked="${rating === n}" aria-label="${n} star${n > 1 ? 's' : ''}" tabindex="0" data-n="${n}" style="color:${n <= rating ? '#e0a800' : '#d3dae6'};">★</span>`).join(''); };
-      paint();
-      const choose = (el) => { if (el && el.dataset.n) { rating = Number(el.dataset.n); paint(); } };
-      pick.addEventListener('click', (e) => choose(e.target));
-      pick.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(e.target); } });
-      const fbCaptcha = Integrations.mountTurnstile('#fbCaptcha', (t) => showMsg(document.getElementById('fbMsg'), t));
-      document.getElementById('reviewForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const msg = document.getElementById('fbMsg');
-        const sendBtn = e.target.querySelector('button[type=submit]');
-        if (!rating) return showMsg(msg, 'Tap a star to rate your visit');
-        if (sendBtn.disabled) return;
-        sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
-        try {
-          const captchaToken = await fbCaptcha.getToken();
-          await apiRequest('/feedback', { method: 'POST', auth: true, body: { bookingId, rating, comment: document.getElementById('fbText').value, captchaToken } });
-          renderReview(b);
         } catch (err) {
-          fbCaptcha.reset();
-          sendBtn.disabled = false; sendBtn.textContent = 'Send feedback';
+          if (err.code === 'WRITE_CONFLICT') {
+            await loadBooking(); // show the booking as it is now
+            const fresh = document.getElementById('payMsg');
+            if (fresh) showMsg(fresh, err.message); else alert(err.message);
+            return;
+          }
           showMsg(msg, err.message);
         }
       });
+    }
+
+    // Rating lives on its own page now
+    function renderReview(b) {
+      const box = document.getElementById('reviewSection');
+      box.innerHTML = b.status === 'completed'
+        ? `<div class="receipt" style="margin-top:16px;"><strong>How was your game?</strong><p style="margin:6px 0 0;"><a href="feedback.html?booking=${encodeURIComponent(b._id)}">Rate this visit in Feedback &amp; Ratings</a></p></div>`
+        : '';
     }
 
     // Back from HitPay's checkout? HitPay adds ?reference=<payment link>&status=... to this page's address.

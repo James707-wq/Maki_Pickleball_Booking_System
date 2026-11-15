@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 /** Facility-wide settings (single document) - AF-112 Operating Hours. Bookings always need approval (AF-116). */
 const SettingsSchema = new mongoose.Schema(
@@ -38,5 +39,8 @@ SettingsSchema.statics.get = async function () {
     throw err;
   }
 };
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+SettingsSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('Settings', SettingsSchema);

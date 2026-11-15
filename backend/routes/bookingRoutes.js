@@ -144,11 +144,7 @@ router.post('/', async (req, res) => {
       discount,
       promoCode,
       paymentStatus: totalFee === 0 ? 'paid' : 'pending', // a 100% promo needs no payment
-<<<<<<< HEAD:backend/routes/bookingRoutes.js
       status: 'pending', // stays pending until staff approve it (AF-116)
-=======
-      status: 'pending', // always starts pending; becomes confirmed only when an admin approves it
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/bookingRoutes.js
       });
     } catch (e) {
       if (claimed) await Promotion.updateOne({ _id: claimed._id }, { $inc: { usedCount: -1 } }); // slot taken: give the use back
@@ -164,12 +160,8 @@ router.post('/', async (req, res) => {
 
     await U.notify(
       req.user._id,
-<<<<<<< HEAD:backend/routes/bookingRoutes.js
       `Booking ${booking.referenceNumber} received for ${court.name} on ${date}, ${startTime}. It will be confirmed once the facility approves it.`,
       { subject: `Booking received: ${court.name}, ${date} ${startTime}`, booking }
-=======
-      `Booking ${booking.referenceNumber} for ${court.name} on ${date}, ${startTime} is pending. It will be confirmed once the facility approves it.`
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/bookingRoutes.js
     );
 
     res.status(201).json({ success: true, booking });
@@ -233,20 +225,12 @@ router.patch('/:id/cancel', async (req, res) => {
     if (booking.paymentStatus === 'paid') booking.paymentStatus = 'refunded';
     await booking.save();
 
-<<<<<<< HEAD:backend/routes/bookingRoutes.js
-    await U.notify(req.user._id, `Your booking ${booking.referenceNumber} was cancelled. Reason: ${reason}`);
+    const refundNote = booking.paymentStatus === 'refunded' ? ' Your payment will be refunded.' : '';
+    await U.notify(req.user._id, `Cancelled: your booking ${booking.referenceNumber} for ${booking.courtName} on ${U.toDateStr(booking.date)} at ${booking.startTime} was cancelled. Reason: ${reason}.${refundNote}`);
+    // tell the facility: the slot is free again, and a paid booking needs its money returned
     const who = [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') || req.user.email;
-    await U.notifyStaff(
-      `${who} cancelled booking ${booking.referenceNumber} (${booking.courtName}, ${U.toDateStr(booking.date)} ${booking.startTime}). Reason: ${reason}`
-    );
-=======
-           const refundNote = booking.paymentStatus === 'refunded' ? ' Your payment will be refunded.' : '';
-       
-          await U.notify(req.user._id, `Cancelled: your booking ${booking.referenceNumber} for ${booking.courtName} on ${U.toDateStr(booking.date)} at ${booking.startTime} was cancelled. Reason: ${reason}.${refundNote}`);
-              // tell the facility: the slot is free again, and a paid booking needs its money returned
     const staffRefund = booking.paymentStatus === 'refunded' ? ` It was paid (₱${booking.totalFee}): please return the payment to the customer.` : '';
-    await U.notifyStaff(`Customer cancelled: ${req.user.firstName} ${req.user.lastName} cancelled booking ${booking.referenceNumber} (${booking.courtName}, ${U.toDateStr(booking.date)} ${booking.startTime}-${booking.endTime}). Reason: ${reason}.${staffRefund}`);
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/bookingRoutes.js
+    await U.notifyStaff(`Customer cancelled: ${who} cancelled booking ${booking.referenceNumber} (${booking.courtName}, ${U.toDateStr(booking.date)} ${booking.startTime}-${booking.endTime}). Reason: ${reason}.${staffRefund}`);
     res.json({ success: true, booking });
   } catch (err) {
     handleError(res, err);

@@ -2,12 +2,9 @@ const Booking = require('../models/Booking');
 const Court = require('../models/Court');
 const BlockedSlot = require('../models/BlockedSlot');
 const Notification = require('../models/Notification');
-<<<<<<< HEAD:backend/utils/bookingUtils.js
 const User = require('../models/User');
 const { PERMISSIONS } = require('../config/permissions');
-=======
 const { nextTimestamp, WriteConflictError } = require('./concurrency');
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:utils/bookingUtils.js
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'completed'];
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000; // Philippines is UTC+8, no DST
@@ -39,7 +36,6 @@ const slotStarts = (open, close, step) => {
   return out;
 };
 
-<<<<<<< HEAD:backend/utils/bookingUtils.js
 const EXPIRED_REASON = 'Expired: it was not approved before the booking time';
 
 /**
@@ -47,19 +43,13 @@ const EXPIRED_REASON = 'Expired: it was not approved before the booking time';
  *  - confirmed -> completed
  *  - still pending (never approved) once the start time passes -> cancelled as expired, so it leaves the
  *    approval queue and shows in the customer's history instead of hanging around forever.
-=======
-/**
- * Housekeeping, run whenever bookings are listed:
- *  - confirmed bookings whose time has passed become "completed"
- *  - pending bookings nobody approved before their time become "cancelled"
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:utils/bookingUtils.js
  */
 async function autoCompleteBookings(extra = {}) {
   const now = new Date();
   const candidates = await Booking.find({ status: 'confirmed', date: { $lte: now }, ...extra }).select('date endTime');
   const ids = candidates.filter((b) => endInstant(b) <= now).map((b) => b._id);
-<<<<<<< HEAD:backend/utils/bookingUtils.js
-  if (ids.length) await Booking.updateMany({ _id: { $in: ids } }, { status: 'completed' });
+  // status is re-checked inside the update: a booking cancelled after we read it must not become "completed"
+  if (ids.length) await Booking.updateMany({ _id: { $in: ids }, status: 'confirmed' }, { status: 'completed' });
 
   const pending = await Booking.find({ status: 'pending', date: { $lte: now }, ...extra })
     .select('date startTime user referenceNumber courtName paymentStatus');
@@ -75,21 +65,6 @@ async function autoCompleteBookings(extra = {}) {
     if (b.paymentStatus === 'paid') {
       await notifyStaff(`Booking ${b.referenceNumber} expired without approval but was already paid. Please refund the customer.`);
     }
-  }
-=======
-  // status is re-checked inside the update: a booking cancelled after we read it must not become "completed"
-  if (ids.length) await Booking.updateMany({ _id: { $in: ids }, status: 'confirmed' }, { status: 'completed' });
-
-  const stale = await Booking.find({ status: 'pending', date: { $lte: now }, ...extra }).select('date endTime user referenceNumber');
-  const reason = 'Not approved before the booking time';
-  for (const b of stale.filter((x) => endInstant(x) <= now)) {
-    // claim each booking atomically so two requests running this job never notify twice,
-    // and a booking approved in the meantime is left alone
-    const expired = await Booking.findOneAndUpdate(
-      { _id: b._id, status: 'pending' },
-      { status: 'cancelled', statusReason: reason, statusChangedAt: now, slotActive: false }
-    );
-    if (expired) await notify(b.user, `Your booking ${b.referenceNumber} expired because it was not approved before the booking time.`);
   }
 }
 
@@ -119,7 +94,6 @@ async function commitScheduleOrUndo(court, undo) {
   if (await commitSchedule(court)) return;
   try { await undo(); } catch (e) { console.error('Rollback failed:', e.message); }
   throw new WriteConflictError('The court schedule changed while this was being saved. Please try again.');
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:utils/bookingUtils.js
 }
 
 const fail = (code, message) => ({ ok: false, code, message });
@@ -167,29 +141,12 @@ async function validateSlot(court, date, startTime, { excludeBookingId = null, a
   };
 }
 
-<<<<<<< HEAD:backend/utils/bookingUtils.js
 /**
  * Creates an in-app notification; never lets a notification failure break the main action.
  * With `outside` ({ subject, booking, attachIcs }) the customer also gets it by SMS / email when those
  * are switched on - sent in the background so the request never waits on them.
  */
 async function notify(userId, message, outside) {
-=======
-/** Notifies every active staff/admin account that can manage bookings. Never breaks the main action. */
-async function notifyStaff(message, feature = 'bookings') {
-  try {
-    const User = require('../models/User');
-    const { PERMISSIONS } = require('../config/permissions');
-    const roles = Object.keys(PERMISSIONS).filter((r) => r !== 'user' && PERMISSIONS[r].includes(feature));
-    const ids = await User.find({ role: { $in: roles }, isActive: true }).distinct('_id');
-    if (ids.length) await Notification.insertMany(ids.map((user) => ({ user, message })));
-  } catch (err) {
-    console.error('Staff notification failed:', err.message);
-  }
-}
-/** Creates an in-app notification; never lets a notification failure break the main action. */
-async function notify(userId, message) {
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:utils/bookingUtils.js
   try {
     await Notification.create({ user: userId, message });
   } catch (err) {
@@ -214,10 +171,6 @@ async function notifyStaff(message) {
 
 module.exports = {
   ACTIVE_STATUSES, toMinutes, toHHMM, manilaMidnight, isDateStr, toDateStr, todayStr,
-<<<<<<< HEAD:backend/utils/bookingUtils.js
   startInstant, endInstant, slotStarts, autoCompleteBookings, validateSlot, notify, notifyStaff,
+  commitSchedule, commitScheduleOrUndo,
 };
-=======
-  endInstant, slotStarts, autoCompleteBookings, validateSlot, notify, notifyStaff, commitSchedule, commitScheduleOrUndo,
-};
->>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:utils/bookingUtils.js

@@ -19,13 +19,14 @@
 </style>
 </head>
 <body class="app">
-  <script src="js/nav.js"></script>
+  <div class="navbar" data-nav="app"></div>
 
   <div class="container" style="max-width: 640px;">
     <div class="card">
       <h1 style="margin-top:0;">Rate your visits</h1>
       <p class="subtitle">Tell us how your games went. You can rate each completed booking once. Need help with a booking instead? <a href="support.html">Contact the admin</a>.</p>
       <div id="toRate"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+      <div id="fbCaptcha" class="captcha"></div>
     </div>
 
     <div class="card" style="margin-top:20px;">
@@ -34,10 +35,18 @@
     </div>
   </div>
 
+  <script src="js/config.js"></script>
+  <script src="js/nav.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/integrations.js"></script>
   <script>
     requireAuth();
-    document.getElementById('logoutBtn').addEventListener('click', logout);
+    // the server asks for the "verify you are human" check (Cloudflare Turnstile) when it is switched on;
+    // one check serves every form on the page, and is reset after each send because a token works only once
+    const fbCaptcha = Integrations.mountTurnstile('#fbCaptcha', (t) => {
+      const m = document.querySelector('#toRate .msg');
+      if (m) showMsg(m, t);
+    });
 
     const focusId = new URLSearchParams(location.search).get('booking');
     const stars = (n) => `<span class="stars">${'★'.repeat(n)}<i>${'★'.repeat(5 - n)}</i></span>`;
@@ -95,13 +104,21 @@
       e.preventDefault();
       const form = e.target;
       const msg = form.querySelector('.msg');
+      const btn = form.querySelector('button[type=submit]');
       const rating = Number(form.querySelector('.starpick').dataset.rating || 0);
       if (!rating) return showMsg(msg, 'Tap a star to rate your visit');
+      if (btn.disabled) return;
+      btn.disabled = true; btn.textContent = 'Sending…';
       try {
+        const captchaToken = await fbCaptcha.getToken();
         await apiRequest('/feedback', { method: 'POST', auth: true, body: {
-          bookingId: form.dataset.id, rating, comment: form.querySelector('textarea').value } });
+          bookingId: form.dataset.id, rating, comment: form.querySelector('textarea').value, captchaToken } });
         load();
-      } catch (err) { showMsg(msg, err.message); }
+      } catch (err) {
+        btn.disabled = false; btn.textContent = 'Send feedback';
+        showMsg(msg, err.message);
+      }
+      fbCaptcha.reset();
     });
 
     load();
