@@ -4,7 +4,8 @@ const { protect } = require('../middleware/auth');
 const handleError = require('../utils/handleError');
 const auditSecurityEvent = require('../utils/securityAudit');
 
-const router = express.Router();
+// txRouter: write routes run as timestamped transactions (abort + restart on conflict)
+const router = require('../utils/concurrency').txRouter(express.Router());
 router.use(protect);
 
 /** UF-105 / AF-103 Profile - GET /api/users/profile (customers and admins) */

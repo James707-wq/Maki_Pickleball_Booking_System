@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 /** AF-129 Complaint/Issue Management (customers report problems as UF-134 / UF-132). */
 const ReplySchema = new mongoose.Schema(
@@ -25,5 +26,8 @@ const IssueSchema = new mongoose.Schema(
   { timestamps: true }
 );
 IssueSchema.index({ status: 1, updatedAt: -1 });
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+IssueSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('Issue', IssueSchema);

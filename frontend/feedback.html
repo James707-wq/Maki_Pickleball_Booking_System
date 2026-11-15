@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Feedback &amp; Ratings - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+<style>
+  .item { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .item:last-child { border-bottom: 0; }
+  .item .meta { color: var(--muted); font-size: .85rem; }
+  .stars { color: #e0a800; font-size: 1.2rem; letter-spacing: 2px; }
+  .stars i { color: #d3dae6; font-style: normal; }
+  .starpick { font-size: 2rem; line-height: 1; margin: 6px 0; cursor: pointer; user-select: none; }
+  .item textarea { margin: 6px 0 0; }
+</style>
+</head>
+<body class="app">
+  <script src="js/nav.js"></script>
+
+  <div class="container" style="max-width: 640px;">
+    <div class="card">
+      <h1 style="margin-top:0;">Rate your visits</h1>
+      <p class="subtitle">Tell us how your games went. You can rate each completed booking once. Need help with a booking instead? <a href="support.html">Contact the admin</a>.</p>
+      <div id="toRate"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h1 style="margin-top:0;font-size:1.2rem;">My feedback</h1>
+      <div id="mine"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    const focusId = new URLSearchParams(location.search).get('booking');
+    const stars = (n) => `<span class="stars">${'★'.repeat(n)}<i>${'★'.repeat(5 - n)}</i></span>`;
+    const when = (b) => `${fmtDate(b.date)} · ${esc(b.startTime)}–${esc(b.endTime)}`;
+
+    async function load() {
+      const toRate = document.getElementById('toRate');
+      const mine = document.getElementById('mine');
+      try {
+        const [{ bookings }, { feedback }] = await Promise.all([
+          apiRequest('/bookings?status=completed', { auth: true }),
+          apiRequest('/feedback/mine', { auth: true }),
+        ]);
+        const reviewed = new Set(feedback.map((f) => String(f.booking && f.booking._id || f.booking)));
+        const pending = bookings.filter((b) => !reviewed.has(String(b._id)));
+        pending.sort((a, b) => (String(b._id) === focusId) - (String(a._id) === focusId));
+
+        toRate.innerHTML = pending.length ? pending.map((b) => `
+          <form class="item" data-id="${esc(b._id)}">
+            <b>${esc(b.courtName || (b.court && b.court.name) || 'Court')}</b>
+            <div class="meta">${when(b)} · ${esc(b.referenceNumber)}</div>
+            <div class="starpick" role="radiogroup" aria-label="Rating"></div>
+            <textarea rows="2" maxlength="1000" placeholder="Tell us about the court and facilities (optional)"></textarea>
+            <button type="submit" class="cta" style="margin-top:10px;">Send feedback</button>
+            <div class="msg"></div>
+          </form>`).join('') : '<div class="empty">Nothing to rate yet. Completed bookings show up here.</div>';
+        toRate.querySelectorAll('.starpick').forEach(paint);
+
+        mine.innerHTML = feedback.length ? feedback.map((f) => `
+          <div class="item">
+            <b>${esc(f.courtName || 'Court')}</b> ${stars(f.rating)}
+            <div class="meta">${f.booking && f.booking.date ? when(f.booking) + ' · ' : ''}${esc(fmtDate(f.createdAt))}</div>
+            ${f.comment ? `<p style="margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;">${esc(f.comment)}</p>` : ''}
+          </div>`).join('') : '<div class="empty">You have not sent any feedback yet.</div>';
+      } catch (err) {
+        toRate.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+        mine.innerHTML = '';
+      }
+    }
+
+    function paint(box) {
+      const r = Number(box.dataset.rating || 0);
+      box.innerHTML = [1, 2, 3, 4, 5].map((n) =>
+        `<span role="radio" aria-checked="${r === n}" aria-label="${n} star${n > 1 ? 's' : ''}" tabindex="0" data-n="${n}" style="color:${n <= r ? '#e0a800' : '#d3dae6'};">★</span>`).join('');
+    }
+    function choose(el) {
+      const box = el.closest('.starpick');
+      if (box && el.dataset.n) { box.dataset.rating = el.dataset.n; paint(box); }
+    }
+    document.getElementById('toRate').addEventListener('click', (e) => choose(e.target));
+    document.getElementById('toRate').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(e.target); }
+    });
+    document.getElementById('toRate').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const msg = form.querySelector('.msg');
+      const rating = Number(form.querySelector('.starpick').dataset.rating || 0);
+      if (!rating) return showMsg(msg, 'Tap a star to rate your visit');
+      try {
+        await apiRequest('/feedback', { method: 'POST', auth: true, body: {
+          bookingId: form.dataset.id, rating, comment: form.querySelector('textarea').value } });
+        load();
+      } catch (err) { showMsg(msg, err.message); }
+    });
+
+    load();
+  </script>
+</body>
+</html>

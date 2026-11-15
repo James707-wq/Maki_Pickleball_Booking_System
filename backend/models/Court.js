@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -27,8 +28,14 @@ const CourtSchema = new mongoose.Schema(
       max: [240, 'Slot length cannot exceed 240 minutes'],
     },
     imageUrl: { type: String, trim: true, default: '' },
+    // Schedule timestamp: changes whenever which slots are bookable changes (a booking is placed or moved
+    // here, a slot is blocked, the hours/slot length/status change). See utils/bookingUtils.commitSchedule.
+    scheduleTS: { type: Date },
   },
   { timestamps: true }
 );
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+CourtSchema.plugin(timestampConcurrency, { ignore: ['scheduleTS'] });
 
 module.exports = mongoose.model('Court', CourtSchema);

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
@@ -31,6 +32,11 @@ const UserSchema = new mongoose.Schema(
     role: { type: String, enum: ['user', 'staff', 'admin'], default: 'user' },
     isActive: { type: Boolean, default: true }, // AF-105/106 deactivate accounts
     passwordChangedAt: { type: Date },
+        // login security (utils/loginSecurity.js)
+    failedLoginCount: { type: Number, default: 0 }, // wrong passwords in a row
+    lockUntil: { type: Date },                       // sign-in refused until this time
+    lastLoginAt: { type: Date },
+    lastLoginIp: { type: String, default: '' },
     resetPasswordToken: { type: String, select: false },
     resetPasswordExpire: { type: Date, select: false },
     // security PIN for sensitive admin changes (turning integrations on/off), hashed like the password.
@@ -61,5 +67,9 @@ UserSchema.methods.getResetPasswordToken = function () {
   this.resetPasswordExpire = Date.now() + 30 * 60 * 1000;
   return resetToken;
 };
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+// lockout bookkeeping doesn't count as a change to the account (an admin's open form stays valid)
+UserSchema.plugin(timestampConcurrency, { ignore: ['failedLoginCount', 'lockUntil', 'lastLoginAt', 'lastLoginIp'] });
 
 module.exports = mongoose.model('User', UserSchema);

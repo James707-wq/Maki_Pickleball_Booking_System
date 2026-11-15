@@ -10,7 +10,11 @@
 <meta name="theme-color" content="#0a325e" />
 </head>
 <body class="app dashboard-page">
+<<<<<<< HEAD:frontend/dashboard.html
   <div class="navbar" data-nav="app"></div>
+=======
+  <script src="js/nav.js"></script>
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:public/dashboard.html
 
   <div class="dash-container wide">
     <section class="hero">
@@ -35,7 +39,8 @@
         <a href="my-bookings.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg><span class="quick-label">My bookings</span></a>
         <a href="booking-status.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h11v17H5V4h3ZM8 2v4M8 10h8M8 14h8M8 18h5"/></svg><span class="quick-label">Check booking status</span></a>
         <a href="profile.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="quick-label">My profile</span></a>
-        <a href="support.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-12.6 7.4L3 21l2.1-5.4A8.5 8.5 0 1 1 21 11.5Z"/></svg><span class="quick-label">Help &amp; support</span></a>
+        <a href="support.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-12.6 7.4L3 21l2.1-5.4A8.5 8.5 0 1 1 21 11.5Z"/></svg><span class="quick-label">Contact admin</span></a>
+        <a href="feedback.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9L12 3Z"/></svg><span class="quick-label">Feedback &amp; ratings</span></a>
         <a href="profile.html#password"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg><span class="quick-label">Change password</span></a>
       </nav>
     </section>
@@ -45,7 +50,7 @@
     <section class="card panel find-us" id="findUs" hidden style="margin-top:18px;"></section>
 
     <section class="card panel" id="annCard" hidden style="margin-top:18px;">
-      <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14V9a2 2 0 0 1 2-2h3l9-4v17l-9-4H6a2 2 0 0 1-2-2ZM9 16l2 5h4l-3-6"/></svg>Announcements</h2>
+                <h2 style="justify-content:flex-start;"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14V9a2 2 0 0 1 2-2h3l9-4v17l-9-4H6a2 2 0 0 1-2-2ZM9 16l2 5h4l-3-6"/></svg>Announcements<a href="announcements.html" style="margin-left:auto;font-size:.78rem;font-weight:600;">View all</a></h2>
       <div id="annList"></div>
       <a href="announcements.html" style="display:inline-block;margin-top:8px;font-size:.88rem;">See all announcements →</a>
     </section>
@@ -60,7 +65,7 @@
         <div id="bookingsList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
       </section>
       <section class="card panel">
-        <h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>Notifications</h2>
+           <h2 style="justify-content:flex-start;"></h2><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>   Notifications<a href="#" id="markAllRead" hidden>Mark all read</a></h2>
         <div id="notificationsList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
       </section>
     </div>
@@ -74,6 +79,30 @@
     requireAuth();
     (() => { const h = new Date(Date.now() + 8*3600e3).getUTCHours(); document.getElementById('greeting').textContent = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; })();
 
+       // Notifications: clicking one marks it read and lowers the unread count
+    function setUnread(n) {
+      document.getElementById('unreadCount').textContent = Math.max(n, 0);
+      document.getElementById('markAllRead').hidden = n <= 0;
+    }
+    document.getElementById('notificationsList').addEventListener('click', async (e) => {
+      const row = e.target.closest('.note[data-id]');
+      if (!row || row.classList.contains('read')) return;
+      try {
+        await apiRequest(`/notifications/${row.dataset.id}/read`, { method: 'PATCH', auth: true });
+        row.classList.add('read');
+        row.removeAttribute('title');
+        setUnread(Number(document.getElementById('unreadCount').textContent) - 1);
+      } catch (err) { /* leave it unread */ }
+    });
+    document.getElementById('markAllRead').addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await apiRequest('/notifications/read-all', { method: 'PATCH', auth: true });
+        document.querySelectorAll('#notificationsList .note').forEach((n) => { n.classList.add('read'); n.removeAttribute('title'); });
+        setUnread(0);
+      } catch (err) { /* ignore */ }
+    }); 
+    
     async function loadDashboard() {
       try {
         const profile = await apiRequest('/users/profile', { auth: true });
@@ -88,11 +117,12 @@
 
         renderUpcoming(upcomingBookings);
 
-        const notifEl = document.getElementById('notificationsList');
+                const notifEl = document.getElementById('notificationsList');
         notifEl.innerHTML = notifications.length
           ? notifications.map(n => `
-              <div class="note"><i></i><div>${esc(n.message)}<small>${new Date(n.createdAt).toLocaleString()}</small></div></div>`).join('')
+              <div class="note${n.read ? ' read' : ''}" data-id="${esc(n._id)}" title="${n.read ? '' : 'Click to mark as read'}"><i></i><div>${esc(n.message)}<small>${new Date(n.createdAt).toLocaleString()}</small></div></div>`).join('')
           : '<div class="empty-state">You are all caught up.</div>';
+        setUnread(unreadNotifications);
 
         if (upcomingBookings.length) {
           const n = upcomingBookings[0];

@@ -14,7 +14,8 @@ const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const handleError = require('../utils/handleError');
 
-const router = express.Router();
+// txRouter: write routes run as timestamped transactions (abort + restart on conflict)
+const router = require('../utils/concurrency').txRouter(express.Router());
 router.use(protect);
 
 router.param('id', (req, res, next, id) => {
@@ -36,6 +37,12 @@ router.get('/notifications', async (req, res) => {
   try {
     const notifications = await Notification.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(30);
     res.json({ success: true, notifications, unread: notifications.filter((n) => !n.read).length });
+  } catch (err) { handleError(res, err); }
+});
+router.patch('/notifications/read-all', async (req, res) => {
+  try {
+    await Notification.updateMany({ user: req.user._id, read: false }, { read: true });
+    res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
 
@@ -90,6 +97,14 @@ router.post('/feedback', async (req, res) => {
       rating: Number(req.body.rating), comment: req.body.comment,
     });
     res.status(201).json({ success: true, feedback: fb });
+  } catch (err) { handleError(res, err); }
+});
+
+router.get('/feedback/mine', async (req, res) => {
+  try {
+    const feedback = await Feedback.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(100)
+      .populate('booking', 'referenceNumber date startTime endTime');
+    res.json({ success: true, feedback });
   } catch (err) { handleError(res, err); }
 });
 

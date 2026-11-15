@@ -24,6 +24,7 @@ const FEATURES = {
   reports: 'Generate reports',
   analytics: 'Booking, revenue & user analytics',
   audit: 'View audit logs',
+    logins: 'Login history & account lockouts',
 };
 
 const ALL = Object.keys(FEATURES);

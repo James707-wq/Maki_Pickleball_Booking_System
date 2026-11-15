@@ -176,6 +176,7 @@ The matrix lives in `backend/config/permissions.js` and is shown on the Roles & 
 ## Project structure
 ```
 makis-pickleball/
+<<<<<<< HEAD
 ├── backend/
 │   ├── server.js            # API server and frontend static-file host
 │   ├── config/              # MongoDB connection and permissions
@@ -187,6 +188,18 @@ makis-pickleball/
 │   └── package.json         # backend dependencies and commands
 └── frontend/                # customer pages, admin pages, CSS, JS, images
     └── js/config.js         # API_URL: backend origin (empty = same origin)
+=======
+├── server.js               # entry point
+├── config/db.js            # MongoDB connection
+├── config/permissions.js   # role -> feature access (admin / staff / user)
+├── models/                 # User, Court, Booking, BlockedSlot, Settings, Notification
+├── middleware/auth.js      # JWT protection + role check (authorize)
+├── routes/                 # auth, user, dashboard, court, booking, admin
+├── utils/                  # bookingUtils (slot rules), concurrency (timestamp CC), handleError, sendEmail
+├── tests/                  # npm test - concurrency control tests
+├── scripts/                # seedCourts.js, createAdmin.js
+└── public/                 # customer pages + admin-login.html, admin.html
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c
 ```
 
 ## Setup
@@ -259,7 +272,78 @@ db.bookings.dropIndexes()   // the server rebuilds the correct unique index on n
 ```
 Or, if the data is only for testing: `db.bookings.drop()`.
 
+<<<<<<< HEAD
 Security PINs need no migration: the first time each admin flips an integration switch, they are asked to create one.
+=======
+## Concurrency control (timestamp-based)
+
+Many people use the system at once: customers book and cancel, staff approve, reschedule and record
+payments, and background jobs complete, expire and remind bookings. The database is protected with
+**timestamp-based concurrency control**, a validation-based (optimistic) form of the timestamp
+ordering protocol. Code: `utils/concurrency.js`. Tests: `npm test`.
+
+### The timestamps
+| Name | Where | Meaning |
+|---|---|---|
+| **W-TS(X)** | `writeTS` on every record (bookings, courts, users, settings, promos, announcements, feedback, issues, blocks, notifications) | when the record was last written |
+| **TS(T)** | `res.locals.tx.ts` on every write request | the transaction's own timestamp, unique and strictly increasing |
+| **Schedule TS** | `scheduleTS` on each court | when anything that decides which slots of that court are bookable last changed |
+
+Timestamps come from `nextTimestamp()`, which never repeats and never goes backwards inside the
+server process, even for two calls in the same millisecond or if the system clock is adjusted.
+
+### The protocol
+1. **Read phase**: a request reads a record and remembers the W-TS it saw.
+2. **Validation + write (one atomic step)**: the update is sent with the filter `{ _id, writeTS: <seen> }`
+   and sets a new W-TS. If another transaction wrote the record in between, nothing matches and the write is rejected.
+   This is automatic for every `doc.save()`. `updateOne / updateMany / findOneAndUpdate` stamp a fresh W-TS
+   so anyone holding the old one is invalidated.
+3. **Abort and restart**: a rejected transaction is rolled back and restarted with a **new TS(T)**,
+   up to 3 times with a short random back-off (`tx()` / `txRouter()` wrap every POST/PUT/PATCH/DELETE route).
+   Business rules are re-checked on the fresh data. For example, a booking that was cancelled meanwhile
+   can no longer be approved.
+
+### Stale screens (client versions)
+A person can look at a record for minutes before clicking. The admin console and customer pages send the
+W-TS of what they displayed in the `If-Match` header (or `expectedWriteTS` in the body). If the record changed
+since then, the server answers **409 `WRITE_CONFLICT`** with who/when wording and does **not** retry. The page
+reloads the record, so nobody overwrites a change they never saw. Requests without a version (old clients,
+scripts) still work and are protected by steps 1-3.
+
+### Races that span several collections (schedule timestamp)
+The unique index `unique_active_slot` stops two bookings on one slot. Some conflicts involve different
+collections, though, and need the court's schedule timestamp:
+
+| Race | What happens now |
+|---|---|
+| Customer books a slot while staff block it | one of them is undone and retried, so the slot is never both booked and blocked |
+| Customer books while staff set the court to maintenance/closed | the booking is undone and retried, then refused ("court is maintenance") |
+| Customer books while staff change hours or slot length | the hours change is re-checked against the new booking, or the booking is retried on the new grid |
+| Staff remove a court while it is being booked | the delete or the booking is retried |
+| Booking moved (rescheduled) or brought back from cancelled onto a slot being blocked | the move is reverted and retried |
+
+Each such operation follows: read the court (remember `scheduleTS`) → check the slots → write → `commitSchedule()`
+(conditional on `scheduleTS`). If the commit fails, its own write is undone (`commitScheduleOrUndo`) and the request restarts.
+Booking-only changes to a court's schedule do **not** change the court's W-TS, so an admin's open court form does not go stale.
+
+### Other fixes made along the way
+- The auto-complete job no longer turns a booking that was cancelled a moment earlier into "completed".
+- Expired-booking notices are sent once, even when two requests run the housekeeping job together.
+- Two admins pressing *Publish* at once no longer send the announcement to every customer twice.
+- Deleting an announcement works again (the route path was misspelled `/a.publishedannouncements/:id`).
+- Customer reschedule checks the slot before looking for the customer's own clashes (it read an undefined date when the slot was invalid).
+
+### Existing databases
+Nothing to migrate: records without `writeTS` are treated as version `null` and still validated. To give old
+records their own version anyway, run `npm run backfill:writets` once.
+
+### Limits
+- Timestamps are strictly ordered within one server process. With several Node processes, the atomic
+  `{ _id, writeTS }` filter still prevents lost updates. Only the TS(T) ordering between processes is approximate.
+- Several customers booking the same court at the same instant are serialised through its schedule
+  timestamp. After 3 failed attempts the customer sees "Please try again". That's fine for a facility's
+  traffic, but very high contention would need MongoDB multi-document transactions (replica set) instead.
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c
 
 ## Notes / next steps
 - Booking is now live end-to-end: pick a slot on `court-details.html` →
@@ -273,7 +357,7 @@ Security PINs need no migration: the first time each admin flips an integration 
 - Customers now get in-app notifications when a booking is received, confirmed,
   rejected, cancelled, moved, or when a payment is recorded or refunded.
 - Double-booking is stopped by a unique index (`unique_active_slot`) on
-  court + date + start time. If the server prints a **WARNING** about that index at
+  court + date + start time, plus timestamp concurrency control (see above). If the server prints a **WARNING** about that index at
   startup, fix it before going live (see the message for the `mongosh` command).
 - Dates are stored as midnight **Philippine time** (UTC+8) so bookings land on the
   right day whatever timezone the server runs in.

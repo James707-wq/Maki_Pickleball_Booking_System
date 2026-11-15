@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 /** AF-127 Promotions and Discounts (shown to customers as UF-131, applied at booking). */
 const PromotionSchema = new mongoose.Schema(
@@ -35,5 +36,8 @@ PromotionSchema.methods.discountFor = function (fee) {
   const d = this.type === 'percent' ? Math.round((fee * this.value) / 100) : this.value;
   return Math.min(Math.max(d, 0), fee);
 };
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+PromotionSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('Promotion', PromotionSchema);

@@ -11,6 +11,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
+   const { startReminders } = require('./utils/reminders');
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -67,6 +68,13 @@ app.use('/api', require('./routes/publicIntegrationRoutes')); // login-page conf
 app.use('/api', engageRoutes);              // UF-130, UF-131, UF-133, UF-134         // AF-102, AF-105..AF-135
 
 const PORT = process.env.PORT || 5000;
+<<<<<<< HEAD:backend/server.js
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 
 startReminderJob(); // UF-129: reminders 2 hours before each confirmed booking
+=======
+   app.listen(PORT, () => {
+     console.log(`Server running on http://localhost:${PORT}`);
+     startReminders(); // 2-hour booking reminders
+   });
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:server.js

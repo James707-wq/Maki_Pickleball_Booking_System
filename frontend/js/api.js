@@ -1,8 +1,11 @@
 // Shared fetch helper for the whole frontend
 const API_BASE = window.API_ROOT || '/api';
 
-async function apiRequest(path, { method = 'GET', body, auth = false } = {}) {
+// version: the record's writeTS as it was shown on screen. The server refuses the change (409
+// WRITE_CONFLICT) if someone else changed the record since, instead of silently overwriting it.
+async function apiRequest(path, { method = 'GET', body, auth = false, version } = {}) {
   const headers = { 'Content-Type': 'application/json' };
+  if (version) headers['If-Match'] = `"${new Date(version).toISOString()}"`;
   if (auth) {
     const token = localStorage.getItem('token');
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -16,7 +19,10 @@ async function apiRequest(path, { method = 'GET', body, auth = false } = {}) {
 
   const data = await res.json();
   if (!res.ok || data.success === false) {
-    throw new Error(data.message || 'Something went wrong');
+    const err = new Error(data.message || 'Something went wrong');
+    err.status = res.status;
+    err.code = data.code; // 'WRITE_CONFLICT' when the record changed under us
+    throw err;
   }
   return data;
 }

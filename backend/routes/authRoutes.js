@@ -5,10 +5,15 @@ const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
 const handleError = require('../utils/handleError');
 const auditSecurityEvent = require('../utils/securityAudit');
+<<<<<<< HEAD:backend/routes/authRoutes.js
 const { verifyTurnstile } = require('../utils/integrations/turnstile');
 const { verifyGoogleIdToken } = require('../utils/integrations/google');
+=======
+const L = require('../utils/loginSecurity');
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/authRoutes.js
 
-const router = express.Router();
+// txRouter: write routes run as timestamped transactions (abort + restart on conflict)
+const router = require('../utils/concurrency').txRouter(express.Router());
 
 const signToken = (id, scope) =>
   jwt.sign(scope ? { id, scope } : { id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
@@ -35,24 +40,27 @@ router.post('/register', async (req, res) => {
   }
 });
 
-const checkCredentials = async (email, password) => {
-  if (!email || !password) return { code: 400, message: 'Please provide email and password' };
-  const user = await User.findOne({ email: String(email).toLowerCase() }).select('+password');
-  if (!user || !(await user.matchPassword(password))) return { code: 401, message: 'Invalid email or password' };
-  if (!user.isActive) return { code: 401, message: 'This account has been deactivated. Please contact the facility.' };
-  return { user };
-};
-
 /** UF-102 User Login - POST /api/auth/login */
 router.post('/login', async (req, res) => {
   try {
+<<<<<<< HEAD:backend/routes/authRoutes.js
     const human = await verifyTurnstile(req.body.captchaToken, req.ip);
     if (!human.ok) return res.status(400).json({ success: false, message: human.message });
     const { user, code, message } = await checkCredentials(req.body.email, req.body.password);
     if (!user) {
       auditSecurityEvent(req, { action: 'Failed customer sign-in', statusCode: code });
       return res.status(code).json({ success: false, message });
+=======
+    const result = await L.checkCredentials(req.body.email, req.body.password);
+    if (result.code) {
+      if (result.reason) L.recordAttempt(req, { portal: 'customer', success: false, reason: result.reason, user: result.user, email: req.body.email });
+      auditSecurityEvent(req, { action: 'Failed customer sign-in', user: result.user, detail: result.reason || '', statusCode: result.code });
+      return res.status(result.code).json({ success: false, message: result.message });
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/authRoutes.js
     }
+    const { user } = result;
+    await L.registerSuccess(user, req);
+    L.recordAttempt(req, { portal: 'customer', success: true, reason: 'ok', user });
     auditSecurityEvent(req, { action: 'Customer signed in', user });
     res.json({ success: true, token: signToken(user._id), user: userPayload(user) });
   } catch (err) {
@@ -63,17 +71,29 @@ router.post('/login', async (req, res) => {
 /** AF-101 Admin Login - POST /api/auth/admin-login (staff and admin accounts only) */
 router.post('/admin-login', async (req, res) => {
   try {
+<<<<<<< HEAD:backend/routes/authRoutes.js
     const human = await verifyTurnstile(req.body.captchaToken, req.ip); // Cloudflare Turnstile, when set up
     if (!human.ok) return res.status(400).json({ success: false, message: human.message });
     const { user, code, message } = await checkCredentials(req.body.email, req.body.password);
     if (!user) {
       auditSecurityEvent(req, { action: 'Failed admin sign-in', statusCode: code });
       return res.status(code).json({ success: false, message });
+=======
+    const result = await L.checkCredentials(req.body.email, req.body.password);
+    if (result.code) {
+      if (result.reason) L.recordAttempt(req, { portal: 'admin', success: false, reason: result.reason, user: result.user, email: req.body.email });
+      auditSecurityEvent(req, { action: 'Failed admin sign-in', user: result.user, detail: result.reason || '', statusCode: result.code });
+      return res.status(result.code).json({ success: false, message: result.message });
+>>>>>>> a7268bdf5982b171a935f488c3beb16a426aba2c:routes/authRoutes.js
     }
+    const { user } = result;
     if (!['staff', 'admin'].includes(user.role)) {
+      L.recordAttempt(req, { portal: 'admin', success: false, reason: 'no_admin_access', user });
       auditSecurityEvent(req, { action: 'Denied admin sign-in', user, detail: 'Account lacks staff access', statusCode: 403 });
       return res.status(403).json({ success: false, message: 'This account does not have admin access' });
     }
+    await L.registerSuccess(user, req);
+    L.recordAttempt(req, { portal: 'admin', success: true, reason: 'ok', user });
     auditSecurityEvent(req, { action: 'Admin signed in', user });
     res.json({ success: true, token: signToken(user._id, 'admin'), user: userPayload(user) });
   } catch (err) {
@@ -206,6 +226,7 @@ router.put('/reset-password/:resettoken', async (req, res) => {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
+    await L.unlock(user._id); // proving email ownership unlocks a locked account
 
     auditSecurityEvent(req, { action: 'Password reset completed', user });
     res.json({ success: true, message: 'Password reset successful', token: signToken(user._id) });
