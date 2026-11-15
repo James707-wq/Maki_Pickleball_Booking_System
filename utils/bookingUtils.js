@@ -1,6 +1,8 @@
 const Booking = require('../models/Booking');
+const Court = require('../models/Court');
 const BlockedSlot = require('../models/BlockedSlot');
 const Notification = require('../models/Notification');
+const { nextTimestamp, WriteConflictError } = require('./concurrency');
 
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'completed'];
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000; // Philippines is UTC+8, no DST
@@ -40,20 +42,48 @@ async function autoCompleteBookings(extra = {}) {
   const now = new Date();
   const candidates = await Booking.find({ status: 'confirmed', date: { $lte: now }, ...extra }).select('date endTime');
   const ids = candidates.filter((b) => endInstant(b) <= now).map((b) => b._id);
-  if (ids.length) await Booking.updateMany({ _id: { $in: ids } }, { status: 'completed' });
+  // status is re-checked inside the update: a booking cancelled after we read it must not become "completed"
+  if (ids.length) await Booking.updateMany({ _id: { $in: ids }, status: 'confirmed' }, { status: 'completed' });
 
   const stale = await Booking.find({ status: 'pending', date: { $lte: now }, ...extra }).select('date endTime user referenceNumber');
-  const staleBookings = stale.filter((b) => endInstant(b) <= now);
-  if (staleBookings.length) {
-    const reason = 'Not approved before the booking time';
-    await Booking.updateMany(
-      { _id: { $in: staleBookings.map((b) => b._id) }, status: 'pending' },
+  const reason = 'Not approved before the booking time';
+  for (const b of stale.filter((x) => endInstant(x) <= now)) {
+    // claim each booking atomically so two requests running this job never notify twice,
+    // and a booking approved in the meantime is left alone
+    const expired = await Booking.findOneAndUpdate(
+      { _id: b._id, status: 'pending' },
       { status: 'cancelled', statusReason: reason, statusChangedAt: now, slotActive: false }
     );
-    for (const b of staleBookings) {
-      await notify(b.user, `Your booking ${b.referenceNumber} expired because it was not approved before the booking time.`);
-    }
+    if (expired) await notify(b.user, `Your booking ${b.referenceNumber} expired because it was not approved before the booking time.`);
   }
+}
+
+/**
+ * Validation + write phase for a court's schedule (timestamp ordering across collections).
+ *
+ * Anything that adds to what occupies a court's slots (a booking placed or moved onto it, a block, a
+ * booking brought back from cancelled) follows: read court (remember scheduleTS) -> read and check the
+ * slots -> write -> commitSchedule. The commit only succeeds if nobody changed the schedule since we read
+ * it; if it fails the caller undoes its write and the request restarts with a new timestamp.
+ * Returns true on success.
+ */
+async function commitSchedule(court) {
+  const seen = court.scheduleTS || null;
+  const next = nextTimestamp();
+  const r = await Court.updateOne(
+    { _id: court._id, scheduleTS: seen },
+    { $set: { scheduleTS: next } },
+    { timestamps: false }
+  );
+  if (r.matchedCount === 1) { court.scheduleTS = next; return true; }
+  return false;
+}
+
+/** Same as commitSchedule but throws a retryable conflict when the schedule moved under us. */
+async function commitScheduleOrUndo(court, undo) {
+  if (await commitSchedule(court)) return;
+  try { await undo(); } catch (e) { console.error('Rollback failed:', e.message); }
+  throw new WriteConflictError('The court schedule changed while this was being saved. Please try again.');
 }
 
 const fail = (code, message) => ({ ok: false, code, message });
@@ -101,6 +131,18 @@ async function validateSlot(court, date, startTime, { excludeBookingId = null, a
   };
 }
 
+/** Notifies every active staff/admin account that can manage bookings. Never breaks the main action. */
+async function notifyStaff(message, feature = 'bookings') {
+  try {
+    const User = require('../models/User');
+    const { PERMISSIONS } = require('../config/permissions');
+    const roles = Object.keys(PERMISSIONS).filter((r) => r !== 'user' && PERMISSIONS[r].includes(feature));
+    const ids = await User.find({ role: { $in: roles }, isActive: true }).distinct('_id');
+    if (ids.length) await Notification.insertMany(ids.map((user) => ({ user, message })));
+  } catch (err) {
+    console.error('Staff notification failed:', err.message);
+  }
+}
 /** Creates an in-app notification; never lets a notification failure break the main action. */
 async function notify(userId, message) {
   try {
@@ -112,5 +154,5 @@ async function notify(userId, message) {
 
 module.exports = {
   ACTIVE_STATUSES, toMinutes, toHHMM, manilaMidnight, isDateStr, toDateStr, todayStr,
-  endInstant, slotStarts, autoCompleteBookings, validateSlot, notify,
+  endInstant, slotStarts, autoCompleteBookings, validateSlot, notify, notifyStaff, commitSchedule, commitScheduleOrUndo,
 };

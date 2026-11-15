@@ -7,8 +7,10 @@ const Promotion = require('../models/Promotion');
 const { protect } = require('../middleware/auth');
 const U = require('../utils/bookingUtils');
 const handleError = require('../utils/handleError');
+const C = require('../utils/concurrency');
 
-const router = express.Router();
+// txRouter: every write route below runs as a timestamped transaction (abort + restart on conflict)
+const router = C.txRouter(express.Router());
 router.use(protect);
 
 const BOOKING_LIST_LIMIT = 100;
@@ -147,6 +149,13 @@ router.post('/', async (req, res) => {
       throw e;
     }
 
+    // Validation phase: if the court's schedule changed after we read it (a block, new hours, a status
+    // change, another booking), undo this booking and restart the request with a new timestamp.
+    await U.commitScheduleOrUndo(court, async () => {
+      await Booking.deleteOne({ _id: booking._id });
+      if (claimed) await Promotion.updateOne({ _id: claimed._id }, { $inc: { usedCount: -1 } });
+    });
+
     await U.notify(
       req.user._id,
       `Booking ${booking.referenceNumber} for ${court.name} on ${date}, ${startTime} is pending. It will be confirmed once the facility approves it.`
@@ -168,6 +177,7 @@ router.post('/:id/payment-proof', async (req, res) => {
     if (!booking || booking.user.toString() !== req.user._id.toString()) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
+    C.assertFresh(req, booking, 'booking');
     if (['cancelled', 'rejected'].includes(booking.status)) {
       return res.status(400).json({ success: false, message: 'This booking is cancelled' });
     }
@@ -199,6 +209,7 @@ router.patch('/:id/cancel', async (req, res) => {
     if (!booking || booking.user.toString() !== req.user._id.toString()) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
+    C.assertFresh(req, booking, 'booking');
     if (!['pending', 'confirmed'].includes(booking.status)) {
       return res.status(400).json({ success: false, message: 'Only pending or confirmed bookings can be cancelled' });
     }
@@ -212,7 +223,11 @@ router.patch('/:id/cancel', async (req, res) => {
     await booking.save();
 
            const refundNote = booking.paymentStatus === 'refunded' ? ' Your payment will be refunded.' : '';
-       await U.notify(req.user._id, `Cancelled: your booking ${booking.referenceNumber} for ${booking.courtName} on ${U.toDateStr(booking.date)} at ${booking.startTime} was cancelled. Reason: ${reason}.${refundNote}`);
+       
+          await U.notify(req.user._id, `Cancelled: your booking ${booking.referenceNumber} for ${booking.courtName} on ${U.toDateStr(booking.date)} at ${booking.startTime} was cancelled. Reason: ${reason}.${refundNote}`);
+              // tell the facility: the slot is free again, and a paid booking needs its money returned
+    const staffRefund = booking.paymentStatus === 'refunded' ? ` It was paid (₱${booking.totalFee}): please return the payment to the customer.` : '';
+    await U.notifyStaff(`Customer cancelled: ${req.user.firstName} ${req.user.lastName} cancelled booking ${booking.referenceNumber} (${booking.courtName}, ${U.toDateStr(booking.date)} ${booking.startTime}-${booking.endTime}). Reason: ${reason}.${staffRefund}`);
     res.json({ success: true, booking });
   } catch (err) {
     handleError(res, err);
@@ -226,6 +241,7 @@ router.post('/:id/checkin', async (req, res) => {
       user: req.user._id,
     });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    C.assertFresh(req, booking, 'booking');
     if (!['confirmed', 'completed'].includes(booking.status)) {
       return res.status(400).json({ success: false, message: 'Only confirmed bookings can be checked in' });
     }
@@ -263,6 +279,7 @@ router.patch('/:id/reschedule', async (req, res) => {
     if (!booking || booking.user.toString() !== req.user._id.toString()) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
+    C.assertFresh(req, booking, 'booking');
     if (!['pending', 'confirmed'].includes(booking.status)) {
       return res.status(400).json({ success: false, message: 'Only pending or confirmed bookings can be rescheduled' });
     }
@@ -280,17 +297,23 @@ router.patch('/:id/reschedule', async (req, res) => {
     if (!court) return res.status(404).json({ success: false, message: 'Court not found' });
 
     const check = await U.validateSlot(court, targetDate, targetStart, { excludeBookingId: booking._id });
-           // the customer can't move onto a time they already hold on another court
-       const ownClash = await Booking.findOne({
-         user: req.user._id, _id: { $ne: booking._id }, date: check.bookingDate, startTime: targetStart,
-         status: { $in: ['pending', 'confirmed'] },
-       });
-       if (ownClash) {
-         return res.status(409).json({ success: false, message: `You already have booking ${ownClash.referenceNumber} at that date and time. Please choose another time.` });
-       }
     if (!check.ok) {
       return res.status(check.code).json({ success: false, message: check.message });
     }
+    // the customer can't move onto a time they already hold on another court
+    const ownClash = await Booking.findOne({
+      user: req.user._id, _id: { $ne: booking._id }, date: check.bookingDate, startTime: targetStart,
+      status: { $in: ['pending', 'confirmed'] },
+    });
+    if (ownClash) {
+      return res.status(409).json({ success: false, message: `You already have booking ${ownClash.referenceNumber} at that date and time. Please choose another time.` });
+    }
+
+    const before = {
+      court: booking.court, courtName: booking.courtName, date: booking.date, startTime: booking.startTime,
+      endTime: booking.endTime, statusChangedAt: booking.statusChangedAt, statusChangedBy: booking.statusChangedBy,
+      statusReason: booking.statusReason, reminderSentAt: booking.reminderSentAt,
+    };
 
     booking.court = court._id;
     booking.courtName = court.name;
@@ -300,7 +323,10 @@ router.patch('/:id/reschedule', async (req, res) => {
     booking.statusChangedAt = new Date();
     booking.statusChangedBy = req.user._id;
     booking.statusReason = 'Customer rescheduled booking';
-    await booking.save();
+    await booking.save(); // conditional on the booking's W-TS
+
+    // the target court's schedule must not have changed since we checked the slot
+    await U.commitScheduleOrUndo(court, () => Booking.updateOne({ _id: booking._id, writeTS: booking.writeTS }, { $set: before }));
 
     await U.notify(req.user._id, `Your booking ${booking.referenceNumber} was rescheduled to ${court.name} on ${targetDate} at ${targetStart}.`);
     res.json({ success: true, booking });

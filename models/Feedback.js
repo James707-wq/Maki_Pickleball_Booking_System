@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 /** AF-128 Feedback Management (customers leave it as UF-133). One review per booking. */
 const FeedbackSchema = new mongoose.Schema(
@@ -13,5 +14,8 @@ const FeedbackSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+FeedbackSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('Feedback', FeedbackSchema);

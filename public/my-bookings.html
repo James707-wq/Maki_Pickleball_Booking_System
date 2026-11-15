@@ -224,10 +224,10 @@
               ${['confirmed', 'completed'].includes(booking.status)
                 && manilaDateInputValue(booking.date) === todayManila()
                 && !booking.checkedInAt
-                ? `<button type="button" class="secondary checkin-btn" data-id="${esc(booking._id)}">Check in</button>`
+                ? `<button type="button" class="secondary checkin-btn" data-id="${esc(booking._id)}" data-version="${esc(booking.writeTS || '')}">Check in</button>`
                 : ''}
               ${['pending', 'confirmed'].includes(booking.status) ? `
-                                  <div class="booking-tools reschedule-form" data-booking-id="${esc(booking._id)}" data-court="${esc(booking.court?._id || booking.court || '')}" data-date="${manilaDateInputValue(booking.date)}" data-start="${esc(booking.startTime)}">
+                                  <div class="booking-tools reschedule-form" data-booking-id="${esc(booking._id)}" data-version="${esc(booking.writeTS || '')}" data-court="${esc(booking.court?._id || booking.court || '')}" data-date="${manilaDateInputValue(booking.date)}" data-start="${esc(booking.startTime)}">
                   <select class="new-court" aria-label="Court">${courtOptions}</select>
                   <input type="date" class="new-date" aria-label="New date" value="${manilaDateInputValue(booking.date)}" />
                                        <select class="new-time" aria-label="New time"><option>Loading times...</option></select>
@@ -267,11 +267,12 @@
           button.addEventListener('click', async () => {
             button.disabled = true;
             try {
-              await apiRequest(`/bookings/${button.dataset.id}/checkin`, { method: 'POST', auth: true });
+              await apiRequest(`/bookings/${button.dataset.id}/checkin`, { method: 'POST', auth: true, version: button.dataset.version });
               await loadBookings();
             } catch (err) {
               button.disabled = false;
               alert(err.message);
+              if (err.code === 'WRITE_CONFLICT') loadBookings();
             }
           });
         });
@@ -279,16 +280,19 @@
         document.querySelectorAll('.cancel-btn').forEach((button) => {
           button.addEventListener('click', async () => {
             const id = button.closest('.reschedule-form').dataset.bookingId;
+            const version = button.closest('.reschedule-form').dataset.version;
             const reason = window.prompt('Reason for cancellation (optional):', 'Customer cancelled this booking');
             try {
               await apiRequest(`/bookings/${id}/cancel`, {
                 method: 'PATCH',
                 auth: true,
+                version,
                 body: { reason: reason || 'Customer cancelled this booking' },
               });
               loadBookings();
             } catch (err) {
               alert(err.message);
+              if (err.code === 'WRITE_CONFLICT') loadBookings();
             }
           });
         });
@@ -308,11 +312,13 @@
               await apiRequest(`/bookings/${id}/reschedule`, {
                 method: 'PATCH',
                 auth: true,
+                version: form.dataset.version,
                 body: { date, startTime, courtId },
               });
               loadBookings();
             } catch (err) {
               alert(err.message);
+              if (err.code === 'WRITE_CONFLICT') loadBookings();
             }
           });
         });

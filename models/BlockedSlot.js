@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 /** A slot an admin has closed off (maintenance, tournament, private event) - AF-113/AF-114. */
 const BlockedSlotSchema = new mongoose.Schema(
@@ -14,5 +15,8 @@ const BlockedSlotSchema = new mongoose.Schema(
 );
 
 BlockedSlotSchema.index({ court: 1, date: 1, startTime: 1 }, { unique: true });
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+BlockedSlotSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('BlockedSlot', BlockedSlotSchema);

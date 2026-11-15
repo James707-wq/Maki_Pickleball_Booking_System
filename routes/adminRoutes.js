@@ -11,8 +11,10 @@ const U = require('../utils/bookingUtils');
 const handleError = require('../utils/handleError');
 const audit = require('../middleware/audit');
 const { logTransaction } = require('../utils/transactions');
+const C = require('../utils/concurrency');
 
-const router = express.Router();
+// txRouter: every write route below runs as a timestamped transaction (abort + restart on conflict)
+const router = C.txRouter(express.Router());
 
 // Everything here needs a logged-in staff/admin. Customers get 403.
 router.use(protect, authorize('dashboard'));
@@ -117,7 +119,7 @@ router.get('/dashboard', async (req, res) => {
 /* ------------------------------------------------------------------ */
 const userView = (u, extra = {}) => ({
   id: u._id, firstName: u.firstName, lastName: u.lastName, email: u.email,
-  phone: u.phone, role: u.role, isActive: u.isActive, createdAt: u.createdAt, ...extra,
+  phone: u.phone, role: u.role, isActive: u.isActive, createdAt: u.createdAt, writeTS: u.writeTS, ...extra,
 });
 // Customer accounts need "users"; staff/admin accounts need "staff".
 const featureForRole = (role) => (role === 'user' ? 'users' : 'staff');
@@ -180,6 +182,7 @@ router.put('/users/:id', async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return bad(res, 'User not found', 404);
     if (denyUnless(req, res, featureForRole(user.role))) return;
+    C.assertFresh(req, user, 'account');
 
     const { firstName, lastName, email, phone, password } = req.body;
     if (firstName !== undefined) user.firstName = firstName;
@@ -203,6 +206,7 @@ router.patch('/users/:id/active', async (req, res) => {
     if (!user) return bad(res, 'User not found', 404);
     if (denyUnless(req, res, featureForRole(user.role))) return;
     if (String(user._id) === String(req.user._id)) return bad(res, "You can't deactivate your own account");
+    C.assertFresh(req, user, 'account');
     if (typeof req.body.isActive !== 'boolean') return bad(res, 'isActive must be true or false');
 
     user.isActive = req.body.isActive;
@@ -220,6 +224,7 @@ router.patch('/users/:id/role', authorize('roles'), async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return bad(res, 'User not found', 404);
     if (String(user._id) === String(req.user._id)) return bad(res, "You can't change your own role");
+    C.assertFresh(req, user, 'account');
 
     user.role = role;
     await user.save();
@@ -318,6 +323,7 @@ router.put('/courts/:id', authorize('courts.manage'), async (req, res) => {
   try {
     const court = await Court.findById(req.params.id);
     if (!court) return bad(res, 'Court not found', 404);
+    C.assertFresh(req, court, 'court');
     const b = req.body;
 
     const openTime = b.openTime ?? court.openTime;
@@ -341,6 +347,11 @@ router.put('/courts/:id', authorize('courts.manage'), async (req, res) => {
     court.openTime = openTime;
     court.closeTime = closeTime;
     court.slotDurationMinutes = step;
+    if (changed) {
+      // the upcoming-bookings check above is only valid if no booking/block landed since we read the court
+      court.$where = { scheduleTS: court.scheduleTS || null };
+      court.scheduleTS = C.nextTimestamp();
+    }
     await court.save();
 
     // keep the denormalized name on existing bookings readable
@@ -359,8 +370,10 @@ router.patch('/courts/:id/status', authorize('courts.status'), async (req, res) 
     if (!COURT_STATUSES.includes(status)) return bad(res, 'Invalid status');
     const court = await Court.findById(req.params.id);
     if (!court) return bad(res, 'Court not found', 404);
+    C.assertFresh(req, court, 'court');
 
     court.status = status;
+    court.scheduleTS = C.nextTimestamp(); // bookings still in progress on this court must re-check its status
     await court.save();
 
     let affectedBookings = 0;
@@ -382,6 +395,7 @@ router.patch('/courts/:id/price', authorize('courts.pricing'), async (req, res) 
     if (!Number.isFinite(price) || price < 0) return bad(res, 'Enter a valid price');
     const court = await Court.findById(req.params.id);
     if (!court) return bad(res, 'Court not found', 404);
+    C.assertFresh(req, court, 'court');
     court.pricePerHour = price;
     await court.save();
     res.json({ success: true, court });
@@ -395,6 +409,7 @@ router.delete('/courts/:id', authorize('courts.manage'), async (req, res) => {
   try {
     const court = await Court.findById(req.params.id);
     if (!court) return bad(res, 'Court not found', 404);
+    C.assertFresh(req, court, 'court');
 
     const upcoming = await Booking.countDocuments({
       court: court._id, date: { $gte: U.manilaMidnight(U.todayStr()) }, status: { $in: ['pending', 'confirmed'] },
@@ -402,8 +417,10 @@ router.delete('/courts/:id', authorize('courts.manage'), async (req, res) => {
     if (upcoming) {
       return bad(res, `This court has ${upcoming} upcoming booking(s). Cancel or move them first, or set the court to "closed" instead.`, 409);
     }
+    // delete only if neither the court nor its schedule changed since the check above
+    const removed = await Court.deleteOne({ _id: court._id, writeTS: court.writeTS || null, scheduleTS: court.scheduleTS || null });
+    if (!removed.deletedCount) throw new C.WriteConflictError('This court changed while it was being removed. Please try again.');
     await BlockedSlot.deleteMany({ court: court._id });
-    await court.deleteOne();
     res.json({ success: true, message: 'Court removed' });
   } catch (err) {
     handleError(res, err);
@@ -424,6 +441,7 @@ router.get('/settings', authorize('settings'), async (req, res) => {
 router.put('/settings', authorize('settings'), async (req, res) => {
   try {
     const settings = await Settings.get();
+    C.assertFresh(req, settings, 'settings');
     const openTime = req.body.openTime ?? settings.openTime;
     const closeTime = req.body.closeTime ?? settings.closeTime;
     const timeErr = checkTimes(openTime, closeTime, 15);
@@ -440,8 +458,16 @@ router.put('/settings', authorize('settings'), async (req, res) => {
       if (problems.length) {
         return bad(res, `Upcoming bookings would fall outside the new hours on: ${problems.join(', ')}. Reschedule them first.`, 409);
       }
-      const r = await Court.updateMany({}, { openTime, closeTime });
-      updatedCourts = r.modifiedCount;
+      // each court is updated only if its schedule is still the one we checked
+      for (const c of courts) {
+        if (c.openTime === openTime && c.closeTime === closeTime) continue;
+        const r = await Court.updateOne(
+          { _id: c._id, scheduleTS: c.scheduleTS || null },
+          { $set: { openTime, closeTime, scheduleTS: C.nextTimestamp() } }
+        );
+        if (!r.matchedCount) throw new C.WriteConflictError('A court schedule changed while the hours were being applied. Please try again.');
+        updatedCourts += 1;
+      }
     }
 
     settings.openTime = openTime;
@@ -535,18 +561,24 @@ router.post('/blocks', authorize('schedule'), async (req, res) => {
 
     let blocked = 0;
     let skipped = 0;
+    const created = [];
     for (const s of targets) {
       const st = U.toHHMM(s);
       if (takenSet.has(st)) { skipped++; continue; }
       try {
-        await BlockedSlot.create({
+        const blk = await BlockedSlot.create({
           court: court._id, date: dayStart, startTime: st, endTime: U.toHHMM(s + step),
           reason: String(reason || '').trim(), createdBy: req.user._id,
         });
+        created.push(blk._id);
         blocked++;
       } catch (e) {
         if (e.code !== 11000) throw e; // already blocked - fine
       }
+    }
+    // a customer may have booked one of these slots while we were checking: validate the court schedule
+    if (created.length) {
+      await U.commitScheduleOrUndo(court, () => BlockedSlot.deleteMany({ _id: { $in: created } }));
     }
     if (!allDay && skipped) return bad(res, 'That slot already has a booking. Cancel or move the booking first.', 409);
     res.status(201).json({ success: true, blocked, skippedBooked: skipped });
@@ -620,6 +652,7 @@ router.patch('/bookings/:id/status', authorize('bookings'), async (req, res) => 
 
     const booking = await Booking.findById(req.params.id).populate('court');
     if (!booking) return bad(res, 'Booking not found', 404);
+    C.assertFresh(req, booking, 'booking');
     if (booking.status === status) return bad(res, `Booking is already ${status}`);
     if (['cancelled', 'rejected'].includes(status) && !reason) {
       return bad(res, `Please give a reason for ${status === 'cancelled' ? 'cancelling' : 'rejecting'} this booking`);
@@ -636,11 +669,21 @@ router.patch('/bookings/:id/status', authorize('bookings'), async (req, res) => 
       if (!check.ok) return bad(res, check.message, check.code);
     }
 
+    const before = {
+      status: booking.status, statusReason: booking.statusReason,
+      statusChangedBy: booking.statusChangedBy, statusChangedAt: booking.statusChangedAt,
+      slotActive: booking.slotActive,
+    };
     booking.status = status;
     booking.statusReason = willBeActive ? '' : reason;
     booking.statusChangedBy = req.user._id;
     booking.statusChangedAt = new Date();
-    await booking.save();
+    await booking.save(); // conditional on the booking's W-TS
+
+    if (!wasActive && willBeActive) {
+      // the slot check above must still hold: nobody blocked/booked/closed it in between
+      await U.commitScheduleOrUndo(booking.court, () => Booking.updateOne({ _id: booking._id, writeTS: booking.writeTS }, { $set: before }));
+    }
 
     const ref = booking.referenceNumber;
     const messages = {
@@ -663,6 +706,7 @@ router.patch('/bookings/:id/reschedule', authorize('bookings'), async (req, res)
     const { courtId, date, startTime } = req.body;
     const booking = await Booking.findById(req.params.id);
     if (!booking) return bad(res, 'Booking not found', 404);
+    C.assertFresh(req, booking, 'booking');
     if (!['pending', 'confirmed'].includes(booking.status)) {
       return bad(res, 'Only pending or confirmed bookings can be rescheduled');
     }
@@ -681,6 +725,11 @@ router.patch('/bookings/:id/reschedule', authorize('bookings'), async (req, res)
     if (!check.ok) return bad(res, check.message, check.code);
 
     const feeBefore = booking.totalFee;
+    const before = {
+      court: booking.court, courtName: booking.courtName, date: booking.date, startTime: booking.startTime,
+      endTime: booking.endTime, totalFee: booking.totalFee, statusChangedBy: booking.statusChangedBy,
+      statusChangedAt: booking.statusChangedAt, reminderSentAt: booking.reminderSentAt,
+    };
     booking.court = court._id;
     booking.courtName = court.name;
     booking.date = check.bookingDate;
@@ -689,7 +738,9 @@ router.patch('/bookings/:id/reschedule', authorize('bookings'), async (req, res)
     if (!sameCourt) booking.totalFee = check.totalFee; // price follows the new court
     booking.statusChangedBy = req.user._id;
     booking.statusChangedAt = new Date();
-    await booking.save();
+    await booking.save(); // conditional on the booking's W-TS
+
+    await U.commitScheduleOrUndo(court, () => Booking.updateOne({ _id: booking._id, writeTS: booking.writeTS }, { $set: before }));
 
     await U.notify(booking.user, `Your booking ${booking.referenceNumber} was moved to ${court.name} on ${date}, ${startTime}-${check.endTime}.`);
 
@@ -735,6 +786,7 @@ router.patch('/bookings/:id/payment', authorize('payments'), async (req, res) =>
     if (!PAYMENT_STATUSES.includes(paymentStatus)) return bad(res, 'Invalid payment status');
     const booking = await Booking.findById(req.params.id);
     if (!booking) return bad(res, 'Booking not found', 404);
+    C.assertFresh(req, booking, 'booking');
     if (paymentStatus === 'paid' && ['cancelled', 'rejected'].includes(booking.status)) {
       return bad(res, "Can't record a payment on a cancelled or rejected booking");
     }

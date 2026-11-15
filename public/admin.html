@@ -35,7 +35,13 @@
     <main class="main">
       <div class="head">
         <div><h1 id="title">Loading</h1><p id="subtitle"></p></div>
-        <div class="actions" id="headActions"></div>
+                <div class="head-right">
+          <div class="actions" id="headActions"></div>
+          <button class="btn bell" id="bellBtn" type="button" aria-label="Notifications" title="Notifications">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+            <span class="bell-count hidden" id="bellCount">0</span>
+          </button>
+        </div>
       </div>
       <div id="view"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i><i></i></div></div>
     </main>

@@ -43,18 +43,29 @@ function signOut() {
   location.replace('admin-login.html');
 }
 
-async function request(url, { method = 'GET', body } = {}) {
+// version: the record's writeTS as displayed. Sent as If-Match so the server can refuse the change
+// (409 WRITE_CONFLICT) when another staff member or the customer changed the record in the meantime.
+async function request(url, { method = 'GET', body, version } = {}) {
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token) { signOut(); throw new Error('Please sign in'); }
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  if (version) headers['If-Match'] = `"${new Date(version).toISOString()}"`;
   const res = await fetch(url, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   let data = {};
   try { data = await res.json(); } catch (e) { /* non-JSON */ }
   if (res.status === 401) { signOut(); throw new Error(data.message || 'Session expired'); }
-  if (!res.ok || data.success === false) throw new Error(data.message || 'Something went wrong');
+  if (!res.ok || data.success === false) {
+    const err = new Error(data.message || 'Something went wrong');
+    err.status = res.status;
+    err.code = data.code;
+    // someone else changed this record: reload the list behind the dialog so it shows the latest data
+    if (data.code === 'WRITE_CONFLICT') setTimeout(() => { try { refreshView(); } catch (e) { /* no list */ } }, 0);
+    throw err;
+  }
   return data;
 }
 const api = (path, opts) => request(`/api/admin${path}`, opts);
@@ -205,7 +216,10 @@ const NAV = [
     { label: 'Revenue analytics', route: 'analytics', href: '#/analytics?tab=revenue', q: { tab: 'revenue' }, perm: 'analytics', title: 'Revenue Analytics', kw: 'income money earnings sales' },
     { label: 'User analytics', route: 'analytics', href: '#/analytics?tab=users', q: { tab: 'users' }, perm: 'analytics', title: 'User Analytics', kw: 'customers signups registered active repeat' },
   ] },
-  { label: 'Audit logs', icon: 'audit', route: 'audit', perm: 'audit', title: 'Audit Logs', kw: 'history activity log who changed monitoring security' },
+    { group: 'security', label: 'Security', icon: 'logins', children: [
+    { label: 'Login security', route: 'logins', perm: 'logins', title: 'Login history and account lockouts', kw: 'login sign in signed who failed password attempts locked lockout unlock ip suspicious brute force' },
+    { label: 'Audit logs', route: 'audit', perm: 'audit', title: 'Audit Logs', kw: 'history activity log who changed monitoring security' },
+  ] },
   { label: 'My account', icon: 'profile', route: 'profile', perm: 'dashboard', title: 'Profile and Change Password', kw: 'profile password change name phone security' },
 ];
 
@@ -610,12 +624,20 @@ function showBooking(b) {
   const send = async (path, body, okText) => {
     $('#bkErr').className = 'msg error hidden';
     try {
-      const r = await api(`/bookings/${b._id}${path}`, { method: 'PATCH', body });
+      const r = await api(`/bookings/${b._id}${path}`, { method: 'PATCH', body, version: b.writeTS });
       toast(okText);
       changed();
-           if (path === '/status') closeModal(); else showBooking(r.booking);
+      if (path === '/status') closeModal(); else showBooking(r.booking);
       return r;
-    } catch (ex) { err(ex.message); return null; }
+    } catch (ex) {
+      if (ex.code === 'WRITE_CONFLICT') {
+        // show the booking as it is now, with the explanation on top
+        try { const fresh = await api(`/bookings/${b._id}`); showBooking(fresh.booking); } catch (e) { /* keep old view */ }
+        showErr($('#bkErr'), ex.message);
+        return null;
+      }
+      err(ex.message); return null;
+    }
   };
 
   let pendingStatus = null;
@@ -756,7 +778,7 @@ function quickPay(kind, b) {
     </form>`);
   $('#payCancel').onclick = closeModal;
   onSubmit($('#payForm'), async (data) => {
-    await api(`/bookings/${b._id}/payment`, { method: 'PATCH', body: { paymentStatus: refund ? 'refunded' : 'paid', paymentMethod: data.paymentMethod } });
+    await api(`/bookings/${b._id}/payment`, { method: 'PATCH', body: { paymentStatus: refund ? 'refunded' : 'paid', paymentMethod: data.paymentMethod }, version: b.writeTS });
     toast(refund ? 'Marked as refunded' : 'Payment recorded');
     closeModal();
     // summary tiles changed too, so redraw the whole view
@@ -966,7 +988,7 @@ async function renderCourts(params) {
     const sel = e.target.closest('select[data-act=status]');
     if (!sel) return;
     try {
-      const r = await api(`/courts/${sel.dataset.id}/status`, { method: 'PATCH', body: { status: sel.value } });
+      const r = await api(`/courts/${sel.dataset.id}/status`, { method: 'PATCH', body: { status: sel.value }, version: (find(sel.dataset.id) || {}).writeTS });
       toast(r.affectedBookings
         ? `Status updated. ${r.affectedBookings} upcoming booking${r.affectedBookings === 1 ? ' is' : 's are'} on this court - review them under Bookings.`
         : 'Status updated');
@@ -985,10 +1007,10 @@ async function renderCourts(params) {
       b.disabled = true; b.classList.add('is-busy');
       try {
         if (b.dataset.act === 'saveprice') {
-          await api(`/courts/${c._id}/price`, { method: 'PATCH', body: { pricePerHour: Number(row.querySelector('[name=price]').value) } });
+          await api(`/courts/${c._id}/price`, { method: 'PATCH', body: { pricePerHour: Number(row.querySelector('[name=price]').value) }, version: c.writeTS });
           toast(`Price for ${c.name} updated`);
         } else {
-          await api(`/courts/${c._id}`, { method: 'PUT', body: { openTime: row.querySelector('[name=open]').value, closeTime: row.querySelector('[name=close]').value, slotDurationMinutes: Number(row.querySelector('[name=step]').value) } });
+          await api(`/courts/${c._id}`, { method: 'PUT', body: { openTime: row.querySelector('[name=open]').value, closeTime: row.querySelector('[name=close]').value, slotDurationMinutes: Number(row.querySelector('[name=step]').value) }, version: c.writeTS });
           toast(`Time slots for ${c.name} updated`);
         }
         refreshView();
@@ -1028,7 +1050,7 @@ function courtForm(c) {
   $('#cfCancel').onclick = closeModal;
   onSubmit($('#courtForm'), async (data) => {
     data.slotDurationMinutes = Number(data.slotDurationMinutes);
-    await api(isNew ? '/courts' : `/courts/${c._id}`, { method: isNew ? 'POST' : 'PUT', body: data });
+    await api(isNew ? '/courts' : `/courts/${c._id}`, { method: isNew ? 'POST' : 'PUT', body: data, version: isNew ? undefined : c.writeTS });
     toast(isNew ? 'Court added' : 'Court updated');
     closeModal();
     refreshView();
@@ -1045,7 +1067,7 @@ function priceForm(c) {
     </form>`);
   $('#prCancel').onclick = closeModal;
   onSubmit($('#priceForm'), async (data) => {
-    await api(`/courts/${c._id}/price`, { method: 'PATCH', body: { pricePerHour: Number(data.pricePerHour) } });
+    await api(`/courts/${c._id}/price`, { method: 'PATCH', body: { pricePerHour: Number(data.pricePerHour) }, version: c.writeTS });
     toast('Price updated');
     closeModal();
     refreshView();
@@ -1062,7 +1084,7 @@ function removeCourt(c) {
     </form>`);
   $('#rmCancel').onclick = closeModal;
   onSubmit($('#rmForm'), async () => {
-    await api(`/courts/${c._id}`, { method: 'DELETE' });
+    await api(`/courts/${c._id}`, { method: 'DELETE', version: c.writeTS });
     toast('Court removed');
     closeModal();
     refreshView();
@@ -1094,7 +1116,8 @@ async function renderSettings() {
     </div></div>`;
   const form = $('#setForm');
   onSubmit(form, async (data) => {
-    const r = await api('/settings', { method: 'PUT', body: { openTime: data.openTime, closeTime: data.closeTime, applyToCourts: data.applyToCourts } });
+    const r = await api('/settings', { method: 'PUT', body: { openTime: data.openTime, closeTime: data.closeTime, applyToCourts: data.applyToCourts }, version: s.writeTS });
+    s.writeTS = r.settings.writeTS; // the form stays open: the next save builds on this version
     toast(r.updatedCourts ? `Saved. Hours updated on ${r.updatedCourts} court${r.updatedCourts === 1 ? '' : 's'}.` : 'Settings saved');
     form.querySelector('[name=applyToCourts]').checked = false;
   });
@@ -1204,7 +1227,7 @@ function toggleActive(u) {
     </form>`);
   $('#acCancel').onclick = closeModal;
   onSubmit($('#actForm'), async () => {
-    await api(`/users/${u.id}/active`, { method: 'PATCH', body: { isActive: !off } });
+    await api(`/users/${u.id}/active`, { method: 'PATCH', body: { isActive: !off }, version: u.writeTS });
     toast(off ? 'Account deactivated' : 'Account reactivated');
     closeModal();
     refreshView();
@@ -1257,7 +1280,7 @@ async function renderRoles() {
     if (!sel) return;
     const u = users.find((x) => x.id === sel.dataset.id);
     try {
-      await api(`/users/${u.id}/role`, { method: 'PATCH', body: { role: sel.value } });
+      await api(`/users/${u.id}/role`, { method: 'PATCH', body: { role: sel.value }, version: u.writeTS });
       toast(`${u.firstName} is now ${ROLE_LABEL[sel.value].toLowerCase()}`);
       renderRoles();
     } catch (err) { toast(err.message, true); refreshView(); }
@@ -1329,7 +1352,37 @@ document.addEventListener('keydown', (e) => {
   const q = view.querySelector('input[type=search]');
   if (q) { e.preventDefault(); q.focus(); q.select(); }
 });
-
+/* ---------- notification bell: e.g. "Customer cancelled booking ..." ---------- */
+async function refreshBell() {
+  try {
+    const d = await request('/api/notifications');
+    const n = d.unread || 0;
+    const c = $('#bellCount');
+    c.textContent = n > 99 ? '99+' : n;
+    c.classList.toggle('hidden', !n);
+    $('#bellBtn').setAttribute('aria-label', n ? `Notifications, ${n} unread` : 'Notifications');
+    return d;
+  } catch (e) { return null; }
+}
+async function openBell() {
+  const d = await refreshBell();
+  const list = d ? d.notifications : [];
+  openModal('Notifications', `
+    ${list.length ? `<ul class="notes">${list.map((x) => `<li class="${x.read ? '' : 'unread'}">${esc(x.message)}<small>${esc(fmtStamp(x.createdAt))}</small></li>`).join('')}</ul>`
+      : '<p class="muted">No notifications yet. You will be told here when a customer cancels a booking.</p>'}
+    <div class="dlg-foot"><button type="button" class="btn" data-act="closebell">Close</button>
+    ${list.some((x) => !x.read) ? '<button type="button" class="btn primary" data-act="readall">Mark all as read</button>' : ''}</div>`);
+  modalBody.onclick = async (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    if (b.dataset.act === 'readall') {
+      try { await request('/api/notifications/read-all', { method: 'PATCH' }); } catch (x) { toast(x.message, true); }
+      modalBody.querySelectorAll('.notes li.unread').forEach((li) => li.classList.remove('unread'));
+      b.remove();
+      refreshBell();
+    } else closeModal();
+  };
+}
 (async function init() {
   if (!localStorage.getItem(TOKEN_KEY)) return signOut();
   try {
@@ -1343,6 +1396,9 @@ document.addEventListener('keydown', (e) => {
   buildNav();
   wireMenu();
   updatePendingBadge();
+    $('#bellBtn').onclick = openBell;
+  refreshBell();
+  setInterval(refreshBell, 60 * 1000); // check for new notifications every minute
   if (!location.hash) location.hash = '#/dashboard';
   route();
 })();

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 /**
  * Notification schema - powers the "notifications" part of the Dashboard (UF-108).
@@ -13,5 +14,8 @@ const NotificationSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+NotificationSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('Notification', NotificationSchema);

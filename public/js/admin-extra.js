@@ -89,7 +89,7 @@ function verifyDialog(b, approve) {
     </form>`);
   $('#vCancel').onclick = closeModal;
   onSubmit($('#vForm'), async (data) => {
-    await api(`/bookings/${b._id}/verify-payment`, { method: 'POST', body: { approve, note: data.note } });
+    await api(`/bookings/${b._id}/verify-payment`, { method: 'POST', body: { approve, note: data.note }, version: b.writeTS });
     toast(approve ? 'Payment verified' : 'Payment rejected');
     closeModal(); refreshView();
   });
@@ -140,7 +140,7 @@ function refundDialog(b) {
     </form>`);
   $('#rfCancel').onclick = closeModal;
   onSubmit($('#rfForm'), async (data) => {
-    await api(`/bookings/${b._id}/refund`, { method: 'POST', body: { amount: Number(data.amount), method: data.method, reason: data.reason } });
+    await api(`/bookings/${b._id}/refund`, { method: 'POST', body: { amount: Number(data.amount), method: data.method, reason: data.reason }, version: b.writeTS });
     toast('Refund recorded; the customer was notified');
     closeModal(); renderRefunds(); 
   });
@@ -276,8 +276,8 @@ async function renderAnnouncements() {
     if (!b) return;
     const a = list.find((x) => x._id === b.closest('[data-id]').dataset.id);
     if (b.dataset.act === 'edit') announcementForm(a);
-    if (b.dataset.act === 'toggle') api(`/announcements/${a._id}/publish`, { method: 'PATCH', body: { published: !a.published } }).then(() => { toast(a.published ? 'Unpublished' : 'Published'); refreshView(); }).catch((x) => toast(x.message, true));
-    if (b.dataset.act === 'del') confirmDelete(`Delete “${a.title}”?`, () => api(`/announcements/${a._id}`, { method: 'DELETE' }).then(() => { toast('Deleted'); refreshView(); }));
+    if (b.dataset.act === 'toggle') api(`/announcements/${a._id}/publish`, { method: 'PATCH', body: { published: !a.published }, version: a.writeTS }).then(() => { toast(a.published ? 'Unpublished' : 'Published'); refreshView(); }).catch((x) => toast(x.message, true));
+    if (b.dataset.act === 'del') confirmDelete(`Delete “${a.title}”?`, () => api(`/announcements/${a._id}`, { method: 'DELETE', version: a.writeTS }).then(() => { toast('Deleted'); refreshView(); }));
   };
 }
 
@@ -292,7 +292,7 @@ function announcementForm(a) {
     </form>`);
   $('#aCancel').onclick = closeModal;
   onSubmit($('#aForm'), async (data) => {
-    await api(a ? `/announcements/${a._id}` : '/announcements', { method: a ? 'PUT' : 'POST', body: data });
+    await api(a ? `/announcements/${a._id}` : '/announcements', { method: a ? 'PUT' : 'POST', body: data, version: a ? a.writeTS : undefined });
     toast(a ? 'Announcement saved' : 'Announcement created');
     closeModal(); refreshView();
   });
@@ -342,8 +342,8 @@ async function renderPromotions() {
     if (!b) return;
     const p = list.find((x) => x._id === b.parentElement.dataset.id);
     if (b.dataset.act === 'edit') promoForm(p);
-    if (b.dataset.act === 'toggle') api(`/promotions/${p._id}/active`, { method: 'PATCH', body: { active: !p.active } }).then(() => { toast(p.active ? 'Promotion turned off' : 'Promotion turned on'); refreshView(); }).catch((x) => toast(x.message, true));
-    if (b.dataset.act === 'del') confirmDelete(`Delete promotion ${p.code}?`, () => api(`/promotions/${p._id}`, { method: 'DELETE' }).then(() => { toast('Deleted'); refreshView(); }));
+    if (b.dataset.act === 'toggle') api(`/promotions/${p._id}/active`, { method: 'PATCH', body: { active: !p.active }, version: p.writeTS }).then(() => { toast(p.active ? 'Promotion turned off' : 'Promotion turned on'); refreshView(); }).catch((x) => toast(x.message, true));
+    if (b.dataset.act === 'del') confirmDelete(`Delete promotion ${p.code}?`, () => api(`/promotions/${p._id}`, { method: 'DELETE', version: p.writeTS }).then(() => { toast('Deleted'); refreshView(); }));
   };
 }
 
@@ -364,7 +364,7 @@ function promoForm(p) {
     </form>`);
   $('#pCancel').onclick = closeModal;
   onSubmit($('#pForm'), async (data) => {
-    await api(p ? `/promotions/${p._id}` : '/promotions', { method: p ? 'PUT' : 'POST', body: data });
+    await api(p ? `/promotions/${p._id}` : '/promotions', { method: p ? 'PUT' : 'POST', body: data, version: p ? p.writeTS : undefined });
     toast(p ? 'Promotion saved' : 'Promotion created');
     closeModal(); refreshView();
   });
@@ -444,7 +444,7 @@ async function renderIssues(params) {
     const issue = d.issues.find((x) => x._id === b.closest('[data-id]').dataset.id);
     if (b.dataset.act === 'reply') return replyDialog(issue);
     const status = b.dataset.act === 'resolve' ? 'resolved' : 'open';
-    api(`/issues/${issue._id}`, { method: 'PATCH', body: { status } }).then(() => { toast(status === 'resolved' ? 'Marked resolved' : 'Reopened'); refreshView(); }).catch((x) => toast(x.message, true));
+    api(`/issues/${issue._id}`, { method: 'PATCH', body: { status }, version: issue.writeTS }).then(() => { toast(status === 'resolved' ? 'Marked resolved' : 'Reopened'); refreshView(); }).catch((x) => toast(x.message, true));
   };
 }
 
@@ -590,6 +590,110 @@ async function renderAnalytics(params) {
   };
 }
 
+/* =====================================================================
+   Login security: login history, failed attempts, locked accounts
+   ===================================================================== */
+EXTRA.views.logins = { label: 'Login security', perm: 'logins', render: renderLogins };
+EXTRA.icons.logins = '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/><circle cx="12" cy="16" r="1.4"/>';
+const lgUi = { page: 1, q: '', result: '', portal: '', date: '' };
+const LOGIN_REASON = {
+  ok: 'Signed in',
+  wrong_password: 'Wrong password',
+  unknown_email: 'No account with this email',
+  deactivated: 'Account is deactivated',
+  locked: 'Refused: account locked',
+  locked_now: 'Wrong password, account now locked',
+  no_admin_access: 'Customer account tried the admin console',
+};
+const loginPill = (l) => (l.success ? pillX('u-active', 'Success')
+  : ['locked', 'locked_now'].includes(l.reason) ? pillX('s-pending', 'Locked') : pillX('p-failed', 'Failed'));
+const ipLabel = (ip) => {
+  const clean = String(ip || '').replace(/^::ffff:/, '');
+  return ['::1', '127.0.0.1'].includes(clean) ? 'This computer' : (clean || 'unknown');
+};
+function deviceOf(ua = '') {
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox'
+    : /Chrome\//.test(ua) ? 'Chrome/Brave' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const os = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone/iPad'
+    : /Mac OS/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : '';
+  return os ? `${browser} on ${os}` : browser;
+}
+const untilLabel = (d) => `${Math.max(1, Math.ceil((new Date(d).getTime() - Date.now()) / 60000))} min left`;
+
+async function renderLogins() {
+  setHead('Login security', 'Who signed in, failed attempts and locked accounts');
+  view.innerHTML = `<div id="lgTop"><div class="card"><div class="skeleton"><i></i><i></i></div></div></div>
+    <div class="bar">
+      <input class="grow" id="lgQ" type="search" placeholder="Search email, name or IP address" value="${esc(lgUi.q)}" aria-label="Search sign-ins" />
+      <select id="lgResult" aria-label="Result">${optionList([['', 'All results'], ['success', 'Successful'], ['failed', 'Failed'], ['locked', 'Locked out']], lgUi.result)}</select>
+      <select id="lgPortal" aria-label="Where">${optionList([['', 'Customer site and admin'], ['customer', 'Customer site'], ['admin', 'Admin console']], lgUi.portal)}</select>
+      <label class="inl">Day <input type="date" id="lgDate" value="${esc(lgUi.date)}" /></label>
+    </div>
+    <div class="card" id="listCard"><div class="skeleton"><i></i><i></i><i></i><i></i></div></div>`;
+
+  async function load() {
+    const d = await api(`/logins?${qsOf({ page: lgUi.page, limit: 25, q: lgUi.q, result: lgUi.result, portal: lgUi.portal, date: lgUi.date })}`);
+    if (d.page > d.pages) { lgUi.page = d.pages; return load(); }
+    const s = d.summary;
+    $('#lgTop').innerHTML = `
+      <div class="card ribbon">
+        <div><div class="k">Successful sign-ins today</div><div class="v num">${s.today.success}</div><div class="s">customers and staff</div></div>
+        <div class="${s.today.failed ? 'urgent' : ''}"><div class="k">Failed attempts today</div><div class="v num">${s.today.failed}</div><div class="s">wrong password or email</div></div>
+        <div class="${s.locked.length ? 'urgent' : ''}"><div class="k">Locked accounts now</div><div class="v num">${s.locked.length}</div><div class="s">after ${s.policy.maxFailed} wrong passwords, for ${s.policy.lockMinutes} min</div></div>
+        <div class="${s.suspiciousIps.length ? 'urgent' : ''}"><div class="k">Suspicious IP addresses</div><div class="v num">${s.suspiciousIps.length}</div><div class="s">${s.policy.maxFailed}+ failures in 24 hours</div></div>
+      </div>
+      ${s.locked.length ? `<div class="card" style="margin-bottom:16px;"><div class="pad"><h2 style="font-size:15px;margin-top:0;">Locked accounts</h2>
+        <div class="tablewrap"><table><thead><tr><th>Account</th><th>Role</th><th>Unlocks</th><th></th></tr></thead><tbody>
+        ${s.locked.map((u) => `<tr data-id="${esc(u.id)}"><td><b>${esc(u.name)}</b><span class="sub">${esc(u.email)}</span></td><td>${pillR(u.role)}</td>
+          <td>${esc(fmtStamp(u.lockUntil))}<span class="sub">${esc(untilLabel(u.lockUntil))}</span></td>
+          <td style="text-align:right;"><button class="btn small" data-act="unlock">Unlock now</button></td></tr>`).join('')}
+        </tbody></table></div></div></div>` : ''}
+      ${s.suspiciousIps.length ? `<div class="card" style="margin-bottom:16px;"><div class="pad"><h2 style="font-size:15px;margin-top:0;">Suspicious IP addresses (last 24 hours)</h2>
+        <div class="tablewrap"><table><thead><tr><th>IP address</th><th>Failed attempts</th><th>Accounts tried</th><th>Last attempt</th><th></th></tr></thead><tbody>
+        ${s.suspiciousIps.map((r) => `<tr><td><b>${esc(ipLabel(r.ip))}</b><span class="sub">${esc(r.ip)}</span></td><td class="num">${r.failed}</td><td class="num">${r.accounts}</td>
+          <td>${esc(fmtStamp(r.last))}</td><td style="text-align:right;"><button class="btn small" data-ip="${esc(r.ip)}">Show attempts</button></td></tr>`).join('')}
+        </tbody></table></div></div></div>` : ''}`;
+
+    $('#listCard').innerHTML = `<div class="tablewrap"><table>
+      <thead><tr><th>When</th><th>Account</th><th>Where</th><th>Result</th><th>Details</th><th>IP / device</th></tr></thead>
+      <tbody>${d.logins.length ? d.logins.map((l) => `<tr>
+        <td>${esc(fmtStamp(l.createdAt))}</td>
+        <td><b>${esc(l.name || l.email || 'Unknown')}</b><span class="sub">${l.name ? esc(l.email) : ''}${l.role ? ` ${pillR(l.role)}` : ''}</span></td>
+        <td>${l.portal === 'admin' ? 'Admin console' : 'Customer site'}</td>
+        <td>${loginPill(l)}</td>
+        <td class="muted">${esc(LOGIN_REASON[l.reason] || l.reason)}</td>
+        <td><span title="${esc(l.ip)}">${esc(ipLabel(l.ip))}</span><span class="sub" title="${esc(l.userAgent || '')}">${esc(deviceOf(l.userAgent))}</span></td>
+      </tr>`).join('') : emptyRow(6, 'No sign-in attempts match these filters.')}</tbody></table></div>${pager2(d, 'attempt')}`;
+  }
+
+  refreshView = () => load().catch((e) => toast(e.message, true));
+  refreshView();
+  const search = debounce(() => { lgUi.q = $('#lgQ').value.trim(); lgUi.page = 1; refreshView(); });
+  view.oninput = (e) => { if (e.target.id === 'lgQ') search(); };
+  view.onchange = (e) => {
+    const map = { lgResult: 'result', lgPortal: 'portal', lgDate: 'date' };
+    if (!map[e.target.id]) return;
+    lgUi[map[e.target.id]] = e.target.value; lgUi.page = 1; refreshView();
+  };
+  view.onclick = async (e) => {
+    const pg = e.target.closest('[data-page]');
+    if (pg && !pg.disabled) { lgUi.page = Number(pg.dataset.page); return refreshView(); }
+    const ipBtn = e.target.closest('[data-ip]');
+    if (ipBtn) {
+      lgUi.q = ipBtn.dataset.ip; lgUi.result = 'failed'; lgUi.page = 1;
+      $('#lgQ').value = lgUi.q; $('#lgResult').value = 'failed';
+      return refreshView();
+    }
+    const b = e.target.closest('[data-act=unlock]');
+    if (!b) return;
+    b.disabled = true; b.classList.add('is-busy');
+    try {
+      await api(`/users/${b.closest('tr').dataset.id}/unlock`, { method: 'PATCH' });
+      toast('Account unlocked. The person can sign in again.');
+      refreshView();
+    } catch (x) { toast(x.message, true); b.disabled = false; b.classList.remove('is-busy'); }
+  };
+}
 /* =====================================================================
    AF-135 Audit Logs
    ===================================================================== */

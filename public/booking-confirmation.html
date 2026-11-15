@@ -39,7 +39,18 @@
       const el = document.getElementById('content');
       try {
         const data = await apiRequest(`/bookings/${bookingId}`, { auth: true });
-        const b = data.booking;
+                const b = data.booking;
+
+        // A receipt is issued only for an approved booking that has been paid.
+        const approved = ['confirmed', 'completed'].includes(b.status);
+        const paid = b.paymentStatus === 'paid';
+        const receiptReady = approved && paid;
+        const waitingFor = [];
+        if (!approved) waitingFor.push('the facility approves your booking');
+        if (!paid) waitingFor.push('your payment is verified');
+        const summaryNote = ['cancelled', 'rejected'].includes(b.status)
+          ? `This booking was ${esc(b.status)}, so no receipt is issued.`
+          : `This is not a receipt. Your official receipt will appear here once ${waitingFor.join(' and ')}.`;
 
         el.innerHTML = `
           ${b.status === 'pending'
@@ -53,7 +64,10 @@
             <div class="ref">${esc(b.referenceNumber)}</div>
           </div>
 
-          <div class="receipt">
+                    <div class="receipt ${receiptReady ? '' : 'no-print'}">
+            <div style="font-weight:700; margin-bottom:6px;">${receiptReady ? 'Official Receipt' : 'Booking Summary'}</div>
+            ${receiptReady ? '' : `<p class="msg" style="display:block; margin:0 0 10px; font-size:.85rem; background:#fff7e0; color:#7a5a00; border-radius:8px; padding:8px 10px;">${summaryNote}</p>`}
+            ${receiptReady && b.paidAt ? `<div class="receipt-row"><span>Paid on</span><span>${fmtDate(b.paidAt)}${b.paymentMethod ? ` · ${esc(b.paymentMethod)}` : ''}</span></div>` : ''}
             <div class="receipt-row"><span>Court</span><span>${esc(b.court?.name || b.courtName)}</span></div>
             <div class="receipt-row"><span>Location</span><span>${esc(b.court?.location || '—')}</span></div>
             <div class="receipt-row"><span>Date</span><span>${fmtDate(b.date)}</span></div>
@@ -68,7 +82,7 @@
           <div id="reviewSection" class="no-print"></div>
 
           <div class="no-print" style="display:flex; gap:10px; margin-top:16px;">
-            <button type="button" class="secondary" onclick="window.print()">Print Receipt</button>
+                        ${receiptReady ? '<button type="button" class="secondary" onclick="window.print()">Print Receipt</button>' : ''}
             <a href="dashboard.html" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Go to Dashboard</a>
             <a href="booking-status.html?reference=${encodeURIComponent(b.referenceNumber)}" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Check Status</a>
           </div>
@@ -104,9 +118,17 @@
         e.preventDefault();
         const msg = document.getElementById('payMsg');
         try {
-          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
+          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, version: b.writeTS, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
           renderPayment(r.booking);
-        } catch (err) { showMsg(msg, err.message); }
+        } catch (err) {
+          if (err.code === 'WRITE_CONFLICT') {
+            await loadBooking(); // show the booking as it is now
+            const fresh = document.getElementById('payMsg');
+            if (fresh) showMsg(fresh, err.message); else alert(err.message);
+            return;
+          }
+          showMsg(msg, err.message);
+        }
       });
     }
 

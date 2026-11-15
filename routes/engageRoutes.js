@@ -14,7 +14,8 @@ const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const handleError = require('../utils/handleError');
 
-const router = express.Router();
+// txRouter: write routes run as timestamped transactions (abort + restart on conflict)
+const router = require('../utils/concurrency').txRouter(express.Router());
 router.use(protect);
 
 router.param('id', (req, res, next, id) => {

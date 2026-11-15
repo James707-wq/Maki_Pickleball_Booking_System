@@ -12,6 +12,7 @@ const RULES = [
   [/^PUT \/users\/[^/]+$/, 'Edited an account'],
   [/^PATCH \/users\/[^/]+\/active$/, 'Activated or deactivated an account'],
   [/^PATCH \/users\/[^/]+\/role$/, 'Changed an account role'],
+    [/^PATCH \/users\/[^/]+\/unlock$/, 'Unlocked a locked account'],
   [/^POST \/courts$/, 'Added a court'],
   [/^PUT \/courts\/[^/]+$/, 'Edited a court'],
   [/^PATCH \/courts\/[^/]+\/status$/, 'Changed a court status'],

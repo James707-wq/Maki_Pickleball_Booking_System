@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { timestampConcurrency } = require('../utils/concurrency');
 
 const ACTIVE = ['pending', 'confirmed', 'completed']; // statuses that occupy a slot
 
@@ -71,5 +72,8 @@ BookingSchema.index(
   { unique: true, partialFilterExpression: { slotActive: true }, name: 'unique_active_slot' }
 );
 BookingSchema.index({ user: 1, date: -1 });
+
+// Timestamp concurrency control: adds writeTS (W-TS) and makes every write validate it.
+BookingSchema.plugin(timestampConcurrency);
 
 module.exports = mongoose.model('Booking', BookingSchema);

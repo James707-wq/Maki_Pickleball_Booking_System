@@ -20,12 +20,16 @@ const Promotion = require('../models/Promotion');
 const Feedback = require('../models/Feedback');
 const Issue = require('../models/Issue');
 const AuditLog = require('../models/AuditLog');
+const LoginAttempt = require('../models/LoginAttempt');
+const L = require('../utils/loginSecurity');
 const { authorize } = require('../middleware/auth');
 const U = require('../utils/bookingUtils');
 const { logTransaction } = require('../utils/transactions');
 const handleError = require('../utils/handleError');
+const C = require('../utils/concurrency');
 
-const router = express.Router();
+// txRouter: every write route below runs as a timestamped transaction (abort + restart on conflict)
+const router = C.txRouter(express.Router());
 
 router.param('id', (req, res, next, id) => {
   if (!mongoose.isValidObjectId(id)) return res.status(404).json({ success: false, message: 'Not found' });
@@ -76,6 +80,7 @@ router.post('/bookings/:id/verify-payment', authorize('payments'), async (req, r
     const note = String(req.body.note || '').trim().slice(0, 200);
     const booking = await Booking.findById(req.params.id);
     if (!booking) return bad(res, 'Booking not found', 404);
+    C.assertFresh(req, booking, 'booking');
     if (booking.paymentStatus !== 'pending') return bad(res, `This payment is already ${booking.paymentStatus}`);
     if (!booking.paymentSubmittedAt) return bad(res, 'The customer has not submitted a payment yet');
     if (dead(booking)) return bad(res, 'This booking is cancelled or rejected');
@@ -114,6 +119,7 @@ router.post('/bookings/:id/refund', authorize('payments'), async (req, res) => {
     if (!reason) return bad(res, 'Please record the reason for the refund');
     const booking = await Booking.findById(req.params.id);
     if (!booking) return bad(res, 'Booking not found', 404);
+    C.assertFresh(req, booking, 'booking');
     if (booking.paymentStatus !== 'paid') return bad(res, 'Only paid bookings can be refunded');
     const amount = req.body.amount === undefined || req.body.amount === '' ? booking.totalFee : Number(req.body.amount);
     if (!Number.isFinite(amount) || amount <= 0 || amount > booking.totalFee) return bad(res, `Refund must be between 1 and ${booking.totalFee}`);
@@ -244,6 +250,7 @@ router.put('/announcements/:id', authorize('announcements'), async (req, res) =>
   try {
     const a = await Announcement.findById(req.params.id);
     if (!a) return bad(res, 'Announcement not found', 404);
+    C.assertFresh(req, a, 'announcement');
     if (req.body.title !== undefined) a.title = req.body.title;
     if (req.body.body !== undefined) a.body = req.body.body;
     await a.save();
@@ -254,18 +261,19 @@ router.patch('/announcements/:id/publish', authorize('announcements'), async (re
   try {
     const a = await Announcement.findById(req.params.id);
     if (!a) return bad(res, 'Announcement not found', 404);
-           const wasPublished = a.published;
-       a.published = req.body.published === true || req.body.published === 'true';
-       if (a.published) a.publishedAt = new Date();
-       await a.save();
-       if (a.published && !wasPublished) await announceCustomers(a, req.user._id);
+    C.assertFresh(req, a, 'announcement');
+    const wasPublished = a.published;
+    a.published = req.body.published === true || req.body.published === 'true';
+    if (a.published && !wasPublished) a.publishedAt = new Date();
+    await a.save(); // conditional on W-TS: two admins pressing Publish together can't both broadcast
+    if (a.published && !wasPublished) await announceCustomers(a, req.user._id);
     res.json({ success: true, announcement: a });
   } catch (err) { handleError(res, err); }
 });
-router.delete('/a.publishedannouncements/:id', authorize('announcements'), async (req, res) => {
+router.delete('/announcements/:id', authorize('announcements'), async (req, res) => {
   try {
-    const a = await Announcement.findByIdAndDelete(req.params.id);
-    if (!a) return bad(res, 'Announcement not found', 404);
+    const a = await Announcement.findOneAndDelete({ _id: req.params.id, ...C.versionFilter(req) });
+    if (!a && !(await C.explainMiss(req, Announcement, req.params.id, 'announcement'))) return bad(res, 'Announcement not found', 404);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -298,6 +306,9 @@ router.put('/promotions/:id', authorize('promotions'), async (req, res) => {
   try {
     const p = await Promotion.findById(req.params.id);
     if (!p) return bad(res, 'Promotion not found', 404);
+    C.assertFresh(req, p, 'promotion');
+    // usedCount is changed atomically by bookings (it is not part of the form), so a booking that
+    // uses the code while the admin edits it only bumps W-TS when it actually ran
     Object.assign(p, promoFields(req.body));
     if (p.startsAt && p.endsAt && p.startsAt > p.endsAt) return bad(res, 'The end date must be after the start date');
     await p.save();
@@ -308,6 +319,7 @@ router.patch('/promotions/:id/active', authorize('promotions'), async (req, res)
   try {
     const p = await Promotion.findById(req.params.id);
     if (!p) return bad(res, 'Promotion not found', 404);
+    C.assertFresh(req, p, 'promotion');
     p.active = req.body.active === true || req.body.active === 'true';
     await p.save();
     res.json({ success: true, promotion: p });
@@ -315,8 +327,8 @@ router.patch('/promotions/:id/active', authorize('promotions'), async (req, res)
 });
 router.delete('/promotions/:id', authorize('promotions'), async (req, res) => {
   try {
-    const p = await Promotion.findByIdAndDelete(req.params.id);
-    if (!p) return bad(res, 'Promotion not found', 404);
+    const p = await Promotion.findOneAndDelete({ _id: req.params.id, ...C.versionFilter(req) });
+    if (!p && !(await C.explainMiss(req, Promotion, req.params.id, 'promotion'))) return bad(res, 'Promotion not found', 404);
     res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
@@ -345,8 +357,8 @@ router.get('/feedback', authorize('feedback'), async (req, res) => {
 router.patch('/feedback/:id', authorize('feedback'), async (req, res) => {
   try {
     if (!['new', 'reviewed', 'hidden'].includes(req.body.status)) return bad(res, 'Invalid status');
-    const f = await Feedback.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
-    if (!f) return bad(res, 'Feedback not found', 404);
+    const f = await Feedback.findOneAndUpdate({ _id: req.params.id, ...C.versionFilter(req) }, { status: req.body.status }, { new: true });
+    if (!f && !(await C.explainMiss(req, Feedback, req.params.id, 'feedback'))) return bad(res, 'Feedback not found', 404);
     res.json({ success: true, feedback: f });
   } catch (err) { handleError(res, err); }
 });
@@ -384,8 +396,8 @@ router.post('/issues/:id/reply', authorize('issues'), async (req, res) => {
 router.patch('/issues/:id', authorize('issues'), async (req, res) => {
   try {
     if (!['open', 'in_progress', 'resolved'].includes(req.body.status)) return bad(res, 'Invalid status');
-    const issue = await Issue.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
-    if (!issue) return bad(res, 'Issue not found', 404);
+    const issue = await Issue.findOneAndUpdate({ _id: req.params.id, ...C.versionFilter(req) }, { status: req.body.status }, { new: true });
+    if (!issue && !(await C.explainMiss(req, Issue, req.params.id, 'report'))) return bad(res, 'Issue not found', 404);
     if (req.body.status === 'resolved') await U.notify(issue.user, `Your report "${issue.subject}" was marked resolved.`);
     res.json({ success: true, issue });
   } catch (err) { handleError(res, err); }
@@ -408,6 +420,7 @@ router.patch('/bookings/:id/checkin', authorize('checkins'), async (req, res) =>
     if (!['in', 'out', 'undo'].includes(action)) return bad(res, 'Invalid action');
     const booking = await Booking.findById(req.params.id);
     if (!booking) return bad(res, 'Booking not found', 404);
+    C.assertFresh(req, booking, 'booking');
     if (!['confirmed', 'completed'].includes(booking.status)) return bad(res, 'Only confirmed bookings can be checked in');
     if (U.toDateStr(booking.date) !== U.todayStr() && action !== 'undo') return bad(res, 'Check-in is only available on the booking date');
     if (action === 'in') {
@@ -598,6 +611,67 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
       };
     }
     res.json({ success: true, from: r.from, to: r.to, truncated: report.rows.length > 2000, ...report, rows: report.rows.slice(0, 2000) });
+  } catch (err) { handleError(res, err); }
+});
+/* ------------------------------------------------------------------ */
+/* Login security: who signed in, failed attempts, locked accounts     */
+/* ------------------------------------------------------------------ */
+const LOGIN_RESULTS = {
+  success: { success: true },
+  failed: { success: false },
+  locked: { reason: { $in: ['locked', 'locked_now'] } },
+};
+
+router.get('/logins', authorize('logins'), async (req, res) => {
+  try {
+    const { page, limit, skip } = pageOf(req, 25);
+    const filter = {};
+    if (LOGIN_RESULTS[req.query.result]) Object.assign(filter, LOGIN_RESULTS[req.query.result]);
+    if (['customer', 'admin'].includes(req.query.portal)) filter.portal = req.query.portal;
+    if (U.isDateStr(req.query.date)) filter.createdAt = { $gte: U.manilaMidnight(req.query.date), $lt: new Date(U.manilaMidnight(req.query.date).getTime() + 864e5) };
+    if (req.query.q) {
+      const safe = escapeRegex(req.query.q);
+      filter.$or = ['email', 'name', 'ip'].map((f) => ({ [f]: { $regex: safe, $options: 'i' } }));
+    }
+
+    const now = new Date();
+    const todayStart = U.manilaMidnight(U.todayStr());
+    const dayAgo = new Date(now.getTime() - 864e5);
+    const [total, logins, todayCounts, lockedUsers, badIps] = await Promise.all([
+      LoginAttempt.countDocuments(filter),
+      LoginAttempt.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      LoginAttempt.aggregate([{ $match: { createdAt: { $gte: todayStart } } }, { $group: { _id: '$success', n: { $sum: 1 } } }]),
+      User.find({ lockUntil: { $gt: now } }).select('firstName lastName email role lockUntil').sort({ lockUntil: -1 }).lean(),
+      LoginAttempt.aggregate([
+        { $match: { success: false, createdAt: { $gte: dayAgo } } },
+        { $group: { _id: '$ip', failed: { $sum: 1 }, emails: { $addToSet: '$email' }, last: { $max: '$createdAt' } } },
+        { $match: { failed: { $gte: L.MAX_FAILED } } },
+        { $sort: { failed: -1 } }, { $limit: 10 },
+      ]),
+    ]);
+    const today = { success: 0, failed: 0 };
+    todayCounts.forEach((r) => { today[r._id ? 'success' : 'failed'] = r.n; });
+
+    res.json({
+      success: true, ...paged(total, page, limit), logins,
+      summary: {
+        today,
+        locked: lockedUsers.map((u) => ({ id: u._id, name: `${u.firstName} ${u.lastName}`, email: u.email, role: u.role, lockUntil: u.lockUntil })),
+        suspiciousIps: badIps.map((r) => ({ ip: r._id || 'unknown', failed: r.failed, accounts: r.emails.length, last: r.last })),
+        policy: { maxFailed: L.MAX_FAILED, lockMinutes: L.LOCK_MINUTES },
+      },
+    });
+  } catch (err) { handleError(res, err); }
+});
+
+router.patch('/users/:id/unlock', authorize('logins'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return bad(res, 'Account not found', 404);
+    if (!user.lockUntil || user.lockUntil <= new Date()) return bad(res, 'This account is not locked');
+    await L.unlock(user._id);
+    await U.notify(user._id, 'Your account was unlocked by the facility. You can sign in again.');
+    res.json({ success: true });
   } catch (err) { handleError(res, err); }
 });
 
