@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Booking Confirmed - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+<style>
+  .receipt { border: 1px dashed var(--border); border-radius: 8px; padding: 18px; margin-top: 18px; }
+  .receipt-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.92rem; }
+  .receipt-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; font-weight: 700; }
+  .ref-box {
+    text-align: center; background: #e8f1fc; border-left: 4px solid var(--cyan); border-radius: 8px; padding: 16px; margin-top: 16px;
+  }
+  .ref-box .ref { font-size: 1.3rem; font-weight: 700; color: var(--primary-dark); letter-spacing: 1px; }
+  @media print { .navbar, .no-print { display: none !important; } }
+</style>
+</head>
+<body class="app">
+  <div class="navbar no-print" data-nav="app"></div>
+
+  <div class="container" style="max-width: 480px;">
+    <div class="card">
+      <div id="content"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/integrations.js"></script>
+  <script>
+    requireAuth();
+
+    // (split: a payment page that adds "?reference=..." to this address with a second "?" must not break the id)
+    const bookingId = (new URLSearchParams(window.location.search).get('id') || '').split('?')[0];
+
+    async function loadBooking() {
+      const el = document.getElementById('content');
+      try {
+        const data = await apiRequest(`/bookings/${bookingId}`, { auth: true });
+        const b = data.booking;
+        // A receipt exists only once the booking is approved and the payment is verified.
+        const hasReceipt = ['confirmed', 'completed'].includes(b.status) && b.paymentStatus === 'paid';
+        const STATUS = { pending: 'Pending approval', confirmed: 'Confirmed', completed: 'Completed', cancelled: 'Cancelled', rejected: 'Not approved' };
+        const PAY = { pending: b.paymentSubmittedAt ? 'Pending verification' : 'Pending', paid: 'Paid', failed: 'Not verified', refunded: 'Refunded' };
+        const payTone = { paid: '#14633c', failed: '#a12a2a', refunded: 'var(--muted)' }[b.paymentStatus] || '#8a5a00';
+
+        el.innerHTML = `
+          ${['cancelled', 'rejected'].includes(b.status)
+            ? `<h1 style="margin-top:0;">Booking ${b.status === 'rejected' ? 'Not Approved' : 'Cancelled'}</h1>
+               <p class="subtitle">${esc(b.statusReason || 'This booking is no longer active.')}</p>`
+            : b.status === 'pending'
+            ? `<h1 style="margin-top:0;">🕓 Booking Received</h1>
+               <p class="subtitle">The facility needs to approve this booking. Your slot is held, and you'll get a notification once it's confirmed.</p>`
+            : `<h1 style="margin-top:0;">✅ Booking Confirmed</h1>
+               <p class="subtitle">Your court is reserved. Show this reference at check-in.</p>`}
+
+          <div class="ref-box">
+            <div style="font-size:0.8rem; color:var(--muted);">Booking Reference</div>
+            <div class="ref">${esc(b.referenceNumber)}</div>
+          </div>
+
+          <h2 style="font-size:1rem;margin:18px 0 0;">${hasReceipt ? 'Payment Receipt' : 'Booking Details'}</h2>
+          <div class="receipt" style="margin-top:8px;">
+            <div class="receipt-row"><span>Court</span><span>${esc(b.court?.name || b.courtName)}</span></div>
+            <div class="receipt-row"><span>Location</span><span>${esc(b.court?.location || '—')}</span></div>
+            <div class="receipt-row"><span>Date</span><span>${fmtDate(b.date)}</span></div>
+            <div class="receipt-row"><span>Time</span><span>${esc(b.startTime)}–${esc(b.endTime)}</span></div>
+            <div class="receipt-row"><span>Booking Status</span><span>${esc(STATUS[b.status] || b.status)}</span></div>
+            <div class="receipt-row"><span>Payment Status</span><span style="font-weight:600;color:${payTone};">${esc(PAY[b.paymentStatus] || b.paymentStatus)}</span></div>
+            ${hasReceipt && b.paidAt ? `<div class="receipt-row"><span>Paid on</span><span>${fmtDate(b.paidAt)}${b.paymentMethod ? ' · ' + esc(b.paymentMethod) : ''}</span></div>` : ''}
+            ${b.promoCode ? `<div class="receipt-row"><span>Promo ${esc(b.promoCode)}</span><span style="color:#14633c;">−₱${esc(b.discount)}</span></div>` : ''}
+            <div class="receipt-row total"><span>${hasReceipt ? 'Total Paid' : 'Total Fee'}</span><span>₱${esc(b.totalFee)}</span></div>
+          </div>
+          ${hasReceipt ? '' : `<p class="no-print" style="font-size:.85rem;color:var(--muted);margin:8px 0 0;">${
+            ['cancelled', 'rejected'].includes(b.status) ? 'No receipt is issued for this booking.'
+              : 'Your receipt will be available here once the facility approves your booking and your payment is verified.'}</p>`}
+
+          <div id="payReturnMsg" class="msg no-print" role="status"></div>
+          <div id="paySection" class="no-print"></div>
+          <div id="qrSection" class="qr-card" hidden></div>
+          <div id="calSection" class="no-print cal-section" hidden></div>
+          <div id="reviewSection" class="no-print"></div>
+
+          <div class="no-print" style="display:flex; gap:10px; margin-top:16px;">
+            ${hasReceipt ? '<button type="button" class="secondary" onclick="window.print()">Print Receipt</button>' : ''}
+            <a href="dashboard.html" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Go to Dashboard</a>
+            <a href="booking-status.html?reference=${encodeURIComponent(b.referenceNumber)}" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Check Status</a>
+          </div>
+        `;
+        renderPayment(b);
+        renderPayOnline(b);
+        renderAddToCalendar(b);
+        renderCheckinQr(b);
+        renderReview(b);
+        checkOnlinePayment(b);
+      } catch (err) {
+        el.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+
+    // Pay online with HitPay (GCash, QR Ph, card and more): reuse the facility's link or start a new one
+    async function renderPayOnline(b) {
+      const slot = document.getElementById('payOnline');
+      if (!slot) return;
+      const cfg = await Integrations.config();
+      const linkOk = b.hitpay && b.hitpay.amount === b.totalFee && /^https:\/\//.test(b.hitpay.checkoutUrl || '');
+      if (!cfg.features.payOnline || !(b.totalFee > 0)) {
+        // switched off (or nothing to pay): only a link staff already sent can be used
+        if (!linkOk) return;
+      }
+      slot.innerHTML = `
+        <button type="button" class="cta" id="payOnlineBtn" style="margin-top:16px;width:100%;">Pay online now · ₱${esc(b.totalFee)}</button>
+        <p style="font-size:.8rem;color:var(--muted);margin:6px 0 0;">GCash, QR Ph, card and more on HitPay's secure checkout. You come back here after paying.</p>
+        <div id="payOnlineMsg" class="msg" role="alert"></div>`;
+      document.getElementById('payOnlineBtn').onclick = async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true; btn.textContent = 'Opening secure checkout…';
+        try {
+          const url = linkOk ? b.hitpay.checkoutUrl
+            : (await apiRequest(`/bookings/${b._id}/pay-online`, { method: 'POST', auth: true })).checkoutUrl;
+          if (!/^https:\/\//.test(url || '')) throw new Error('Online payment is not available right now.');
+          window.location.href = url;
+        } catch (err) {
+          btn.disabled = false; btn.textContent = `Pay online now · ₱${b.totalFee}`;
+          showMsg(document.getElementById('payOnlineMsg'), err.message);
+        }
+      };
+    }
+
+    // QR code to show at the front desk (confirmed bookings, when QR check-in is switched on)
+    async function renderCheckinQr(b) {
+      const box = document.getElementById('qrSection');
+      if (!box || b.status !== 'confirmed' || b.checkedInAt) return;
+      const cfg = await Integrations.config();
+      if (!cfg.features.qrCheckin) return;
+      try {
+        const { code } = await apiRequest(`/bookings/${b._id}/checkin-code`, { auth: true });
+        if (!window.qrcode) {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+            s.onload = resolve; s.onerror = reject;
+            document.head.appendChild(s);
+          });
+        }
+        const qr = qrcode(0, 'M');
+        qr.addData(code);
+        qr.make();
+        box.innerHTML = `
+          <div class="qr-img" role="img" aria-label="Check-in QR code for booking ${esc(b.referenceNumber)}">${qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true })}</div>
+          <div><b>Check-in QR code</b><p>Show this at the front desk on the day of your booking. Staff scan it to check you in.</p>
+          <p class="qr-ref">Ref: ${esc(b.referenceNumber)}</p></div>`;
+        box.hidden = false;
+      } catch (e) { /* QR is optional: the reference number still works at the desk */ }
+    }
+
+    // Add to calendar (Google, or a .ics file for Apple/Outlook) + where the facility is
+    async function renderAddToCalendar(b) {
+      const box = document.getElementById('calSection');
+      if (!box) return;
+      const links = await Integrations.calendarButtons(b);
+      if (links) {
+        box.innerHTML = `<b>Add it to your calendar</b>${links}<small>Includes a reminder 2 hours before.</small>`;
+        box.hidden = false;
+      }
+      if (!['cancelled', 'rejected'].includes(b.status) && !document.getElementById('findUs')) {
+        box.insertAdjacentHTML('afterend', '<section id="findUs" class="find-us no-print" hidden></section>');
+        Integrations.mountFacilityMap(document.getElementById('findUs'), { height: 180 });
+      }
+    }
+
+    // UF-121 / AF-121: tell the facility how you paid so staff can verify it
+    function renderPayment(b) {
+      const box = document.getElementById('paySection');
+      if (['cancelled', 'rejected'].includes(b.status) || b.paymentStatus === 'refunded') { box.innerHTML = ''; return; }
+      if (b.paymentStatus === 'paid') { box.innerHTML = '<p style="font-size:.85rem;color:#14633c;margin-top:12px;">✅ Payment received. Thank you!</p>'; return; }
+      // HitPay link (sent by the facility, or started with "Pay online now"): GCash, QR Ph, card and more on HitPay's page
+      // only offer a link that matches the current fee (the fee can change after a reschedule)
+      const payOnline = '<div id="payOnline"></div>'; // filled by renderPayOnline() when online payment is on
+      if (b.paymentStatus === 'pending' && b.paymentSubmittedAt) {
+        box.innerHTML = payOnline + `<p style="font-size:.85rem;color:var(--muted);margin-top:12px;">🕓 We received your ${esc(b.paymentMethod)} reference <b>${esc(b.paymentReference)}</b>. Staff will verify it shortly.</p>`;
+        return;
+      }
+      box.innerHTML = payOnline + `
+        <form id="payForm" class="receipt" style="margin-top:16px;">
+          <strong>Already paid? Send us the details</strong>
+          ${b.paymentStatus === 'failed' ? `<p class="msg error" style="display:block;">Your last payment could not be verified${b.paymentNote ? ': ' + esc(b.paymentNote) : ''}. Please check and send it again.</p>` : '<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0;">You can also just pay at the facility before your time.</p>'}
+          <label for="payMethod">Paid with</label>
+          <select id="payMethod" required><option value="">Choose…</option><option>GCash</option><option>Maya</option><option>Bank transfer</option><option>Card</option><option>Other</option></select>
+          <label for="payRef">Reference number</label>
+          <input id="payRef" maxlength="60" placeholder="e.g. GCash ref no." required />
+          <button type="submit" class="cta" style="margin-top:12px;">Send payment details</button>
+          <div id="payMsg" class="msg"></div>
+        </form>`;
+      document.getElementById('payForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('payMsg');
+        try {
+          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
+          renderPayment(r.booking);
+        } catch (err) { showMsg(msg, err.message); }
+      });
+    }
+
+    // UF-133: rate a completed booking (once)
+    async function renderReview(b) {
+      const box = document.getElementById('reviewSection');
+      if (b.status !== 'completed') { box.innerHTML = ''; return; }
+      let existing = null;
+      try { existing = (await apiRequest(`/feedback/booking/${bookingId}`, { auth: true })).feedback; } catch (e) { /* show the form anyway */ }
+      if (existing) {
+        box.innerHTML = `<div class="receipt" style="margin-top:16px;"><strong>Thanks for your feedback!</strong><div style="color:#e0a800;font-size:1.2rem;">${'★'.repeat(existing.rating)}<span style="color:#d3dae6;">${'★'.repeat(5 - existing.rating)}</span></div>${existing.comment ? `<p style="margin:6px 0 0;">${esc(existing.comment)}</p>` : ''}</div>`;
+        return;
+      }
+      box.innerHTML = `
+        <form id="reviewForm" class="receipt" style="margin-top:16px;">
+          <strong>How was your game?</strong>
+          <div id="starPick" role="radiogroup" aria-label="Rating" style="font-size:2rem;line-height:1;margin:6px 0;cursor:pointer;user-select:none;"></div>
+          <textarea id="fbText" rows="3" maxlength="1000" placeholder="Tell us about the court and facilities (optional)"></textarea>
+          <div id="fbCaptcha" class="captcha"></div>
+          <button type="submit" class="cta" style="margin-top:10px;">Send feedback</button>
+          <div id="fbMsg" class="msg"></div>
+        </form>`;
+      let rating = 0;
+      const pick = document.getElementById('starPick');
+      const paint = () => { pick.innerHTML = [1, 2, 3, 4, 5].map((n) => `<span role="radio" aria-checked="${rating === n}" aria-label="${n} star${n > 1 ? 's' : ''}" tabindex="0" data-n="${n}" style="color:${n <= rating ? '#e0a800' : '#d3dae6'};">★</span>`).join(''); };
+      paint();
+      const choose = (el) => { if (el && el.dataset.n) { rating = Number(el.dataset.n); paint(); } };
+      pick.addEventListener('click', (e) => choose(e.target));
+      pick.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(e.target); } });
+      const fbCaptcha = Integrations.mountTurnstile('#fbCaptcha', (t) => showMsg(document.getElementById('fbMsg'), t));
+      document.getElementById('reviewForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const msg = document.getElementById('fbMsg');
+        const sendBtn = e.target.querySelector('button[type=submit]');
+        if (!rating) return showMsg(msg, 'Tap a star to rate your visit');
+        if (sendBtn.disabled) return;
+        sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+        try {
+          const captchaToken = await fbCaptcha.getToken();
+          await apiRequest('/feedback', { method: 'POST', auth: true, body: { bookingId, rating, comment: document.getElementById('fbText').value, captchaToken } });
+          renderReview(b);
+        } catch (err) {
+          fbCaptcha.reset();
+          sendBtn.disabled = false; sendBtn.textContent = 'Send feedback';
+          showMsg(msg, err.message);
+        }
+      });
+    }
+
+    // Back from HitPay's checkout? HitPay adds ?reference=<payment link>&status=... to this page's address.
+    // Those are never trusted: the server asks HitPay itself. Tidy the address so a reload looks normal.
+    const backFromCheckout = /[?&](reference|status)=/.test(window.location.search);
+    if (backFromCheckout) history.replaceState(null, '', `booking-confirmation.html?id=${encodeURIComponent(bookingId)}`);
+
+    // An unpaid HitPay link: ask whether it was paid (works without the webhook, e.g. on localhost)
+    let paymentChecked = false;
+    async function checkOnlinePayment(b) {
+      if (paymentChecked || !b.hitpay || !b.hitpay.requestId || b.paymentStatus === 'paid' || ['cancelled', 'rejected'].includes(b.status)) return;
+      paymentChecked = true;
+      let paid = false;
+      try { paid = (await apiRequest(`/bookings/${b._id}/pay-online/check`, { method: 'POST', auth: true })).paid; } catch (e) { /* staff can still check it */ }
+      if (paid) {
+        await loadBooking();
+        showMsg(document.getElementById('payReturnMsg'), 'Your online payment went through.', 'success');
+      } else if (backFromCheckout) {
+        showMsg(document.getElementById('payReturnMsg'), "We haven't received your online payment yet. If you just paid, it can take a minute: reload this page shortly.", 'note');
+      }
+    }
+
+    loadBooking();
+  </script>
+</body>
+</html>

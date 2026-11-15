@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Announcements - MAKI's PickleBall Court</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="img/favicon-32.png" />
+  <meta name="theme-color" content="#0a325e" />
+  <style>
+    .ann { padding: 16px 0; border-top: 1px solid var(--border); }
+    .ann:first-child { border-top: 0; padding-top: 4px; }
+    .ann h2 { font-size: 1.05rem; margin: 0 0 4px; }
+    .ann time { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 8px; }
+    .ann p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+  </style>
+</head>
+<body class="app">
+  <div class="navbar" data-nav="app"></div>
+
+  <div class="container" style="max-width: 720px;">
+    <div class="card">
+      <h1 style="margin-top:0;">Announcements</h1>
+      <p class="subtitle">News and notices from the facility.</p>
+      <div id="annList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+
+    (async () => {
+      const list = document.getElementById('annList');
+      try {
+        const { announcements } = await apiRequest('/announcements', { auth: true });
+        list.innerHTML = announcements.length
+          ? announcements.map((a) => `
+            <article class="ann">
+              <h2>${esc(a.title)}</h2>
+              <time datetime="${esc(a.publishedAt)}">${a.publishedAt ? fmtDate(a.publishedAt) : ''}</time>
+              <p>${esc(a.body)}</p>
+            </article>`).join('')
+          : '<div class="empty">No announcements right now. Check back later.</div>';
+      } catch (err) {
+        if (err.message.includes('authorized')) return logout();
+        list.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

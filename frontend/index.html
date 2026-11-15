@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Login - MAKI's PickleBall Court</title>
+<link rel="stylesheet" href="css/style.css" />
+<link rel="icon" type="image/png" href="img/favicon-32.png" />
+<link rel="apple-touch-icon" href="img/favicon.png" />
+<meta name="theme-color" content="#0a325e" />
+</head>
+<body class="auth">
+  <div class="container">
+    <p class="auth-tag"><b>Play more. Wait less.</b><span>Book your pickleball court in seconds.</span></p>
+    <div class="card">
+      <div class="logo-banner"><img src="img/logo.png" alt="MAKI's Pickleball Court" /></div>
+      <h1>Welcome back</h1>
+      <p class="subtitle">Log in to manage your bookings</p>
+
+      <!-- Google Sign-In: shown only when the admin has it switched on -->
+      <div id="googleBox" class="oauth" hidden>
+        <div id="googleBtn" class="oauth-btn"></div>
+        <div class="divider"><span>or log in with email</span></div>
+      </div>
+      <form id="loginForm" novalidate>
+        <label for="email">Email</label>
+        <input type="email" id="email" autocomplete="username" required />
+
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required />
+
+        <div id="captcha" class="captcha"></div>
+        <button type="submit" id="submitBtn">Log In</button>
+        <div id="msg" class="msg" role="alert" aria-live="assertive"></div>
+      </form>
+
+      <div class="links-row">
+        <a href="forgot-password.html">Forgot password?</a>
+        <a href="register.html">Create an account</a>
+      </div>
+      <p style="text-align:center; font-size:0.8rem; margin:16px 0 0;"><a href="admin-login.html" style="color:var(--muted);">Staff sign in</a></p>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/integrations.js"></script>
+  <script>
+    const msg = document.getElementById('msg');
+    const btn = document.getElementById('submitBtn');
+    const busy = (on, text = 'Logging in…') => { btn.disabled = on; btn.textContent = on ? text : 'Log In'; };
+    const goIn = (token) => { localStorage.setItem('token', token); window.location.href = 'dashboard.html'; };
+    const captcha = Integrations.mountTurnstile('#captcha', (t) => showMsg(msg, t));
+
+    Integrations.mountGoogle(document.getElementById('googleBox'), document.getElementById('googleBtn'), {
+      text: 'continue_with',
+      onCredential: async (credential) => {
+        busy(true, 'Signing in with Google…');
+        try { goIn((await apiRequest('/auth/google', { method: 'POST', body: { credential } })).token); }
+        catch (err) { busy(false); showMsg(msg, err.message); }
+      },
+    });
+
+    document.getElementById('loginForm').addEventListener('input', () => { msg.className = 'msg'; msg.textContent = ''; });
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (btn.disabled) return;
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      if (!email || !password) return showMsg(msg, 'Enter your email and password.');
+      busy(true, captcha.needsWait() ? 'Checking…' : 'Logging in…');
+      try {
+        const captchaToken = await captcha.getToken();
+        busy(true);
+        goIn((await apiRequest('/auth/login', { method: 'POST', body: { email, password, captchaToken } })).token);
+      } catch (err) {
+        busy(false);
+        captcha.reset();
+        showMsg(msg, err.message);
+      }
+    });
+  </script>
+</body>
+</html>
