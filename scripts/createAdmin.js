@@ -7,6 +7,8 @@
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']); // router DNS refuses the Atlas SRV lookup
 const User = require('../models/User');
 
 const [argEmail, argPassword, argFirst, argLast] = process.argv.slice(2);

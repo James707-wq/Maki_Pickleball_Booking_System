@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const dns = require('dns');
+// Some Wi-Fi routers/ISPs refuse the SRV lookup that "mongodb+srv://" needs.
+// Use public DNS servers for these lookups so Atlas can be found.
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 const Booking = require('../models/Booking');
 
 const connectDB = async () => {

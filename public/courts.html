@@ -13,20 +13,33 @@
   <script src="js/nav.js"></script>
 
   <div class="dash-container">
-    <h1>Available Courts</h1>
+    <div class="page-title">
+      <div><span class="eyebrow">Find your court</span><h1>Courts</h1><p>Pick a court to see open time slots and book instantly.</p></div>
+    </div>
 
     <div class="filters-bar">
-      <input type="text" id="searchInput" placeholder="Search by name or location..." />
-      <select id="statusFilter">
+      <div class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="searchInput" placeholder="Search by name or location..." aria-label="Search courts" />
+      </div>
+      <select id="statusFilter" aria-label="Status">
         <option value="">All statuses</option>
         <option value="available">Available</option>
         <option value="maintenance">Maintenance</option>
         <option value="unavailable">Unavailable</option>
         <option value="closed">Closed</option>
       </select>
-      <input type="text" id="facilityFilter" placeholder="Filter by facility (e.g. Indoor)" />
+      <input type="text" id="facilityFilter" placeholder="Facility (e.g. Indoor)" aria-label="Facility" />
+    </div>
+    <div class="chips" id="facilityChips" aria-label="Quick facility filters">
+      <button type="button" class="chip on" data-f="">All</button>
+      <button type="button" class="chip" data-f="Indoor">🏠 Indoor</button>
+      <button type="button" class="chip" data-f="Outdoor">🌤️ Outdoor</button>
+      <button type="button" class="chip" data-f="Lighting">💡 Lighting</button>
+      <button type="button" class="chip" data-f="Parking">🚗 Parking</button>
     </div>
 
+    <p class="result-count" id="resultCount" aria-live="polite"></p>
     <div id="courtGrid" class="court-grid"><div class="skel-grid" aria-label="Loading courts"><span class="skel-card"></span><span class="skel-card"></span><span class="skel-card"></span></div></div>
   </div>
 
@@ -51,19 +64,27 @@
 
       try {
         const data = await apiRequest(`/courts?${params.toString()}`, { auth: true });
+        const count = document.getElementById('resultCount');
         if (!data.courts.length) {
-          grid.innerHTML = '<div class="empty">No courts match your search/filters.</div>';
+          count.textContent = '';
+          grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="ill">🔍</div>No courts match your search or filters.</div>';
           return;
         }
+        const open = data.courts.filter((c) => c.status === 'available').length;
+        count.textContent = `${data.courts.length} court${data.courts.length === 1 ? '' : 's'} · ${open} open for booking`;
 
         grid.innerHTML = data.courts.map(c => `
-          <a class="court-card" href="court-details.html?id=${esc(c._id)}">
-            <span class="status-badge status-${esc(c.status)}">${esc(c.status)}</span>
-            <h3>${esc(c.name)}</h3>
-            <div class="loc">${esc(c.location)}</div>
-            <div class="price">₱${esc(c.pricePerHour)} / hour</div>
-            <div class="tags">
-              ${(c.facilities || []).map(f => `<span class="tag">${esc(f)}</span>`).join('')}
+          <a class="court-card spot" href="court-details.html?id=${esc(c._id)}">
+            <div class="court-media">
+              <img src="${esc(courtImage(c))}" alt="${esc(c.name)}" loading="lazy" />
+              <span class="status-badge status-${esc(c.status)}">${esc(c.status)}</span>
+              <span class="price-chip">₱${esc(c.pricePerHour)}<small> /hr</small></span>
+            </div>
+            <div class="court-body">
+              <h3>${esc(c.name)}</h3>
+              <div class="loc"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></svg>${esc(c.location)}</div>
+              <div class="tags">${(c.facilities || []).map(f => `<span class="tag">${esc(f)}</span>`).join('')}</div>
+              <div class="go">${c.status === 'available' ? 'View times' : 'View details'} <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
             </div>
           </a>
         `).join('');
@@ -78,6 +99,18 @@
         debounceTimer = setTimeout(loadCourts, 300);
       });
       el.addEventListener('change', loadCourts);
+    });
+
+    // quick facility chips fill the facility box
+    document.getElementById('facilityChips').addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      document.querySelectorAll('#facilityChips .chip').forEach((c) => c.classList.toggle('on', c === chip));
+      facility.value = chip.dataset.f;
+      loadCourts();
+    });
+    facility.addEventListener('input', () => {
+      document.querySelectorAll('#facilityChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.f.toLowerCase() === facility.value.trim().toLowerCase()));
     });
 
     loadCourts();

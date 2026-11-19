@@ -20,6 +20,14 @@ const UserSchema = new mongoose.Schema(
       match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
     },
     phone: { type: String, trim: true, default: '' },
+    // customizable profile avatar - option keys only (see public/js/avatar.js), validated in routes/userRoutes.js
+    avatar: {
+      type: new mongoose.Schema({
+        skin: String, hair: String, hairColor: String, eyes: String, brows: String, mouth: String,
+        facial: String, hat: String, glasses: String, shirt: String, bg: String,
+      }, { _id: false }),
+      default: undefined,
+    },
     password: {
       type: String,
       required: [true, 'Password is required'],

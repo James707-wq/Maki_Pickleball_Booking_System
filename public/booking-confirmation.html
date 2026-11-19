@@ -9,20 +9,24 @@
 <link rel="apple-touch-icon" href="img/favicon.png" />
 <meta name="theme-color" content="#0a325e" />
 <style>
-  .receipt { border: 1px dashed var(--border); border-radius: 8px; padding: 18px; margin-top: 18px; }
+  .receipt { border: 1.5px dashed #d5dfec; border-radius: 16px; padding: 18px; margin-top: 18px; background: #fbfcfe; }
   .receipt-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.92rem; }
   .receipt-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 10px; font-weight: 700; }
   .ref-box {
-    text-align: center; background: #e8f1fc; border-left: 4px solid var(--cyan); border-radius: 8px; padding: 16px; margin-top: 16px;
+    text-align: center; background: var(--navy); color: #fff; border-radius: 18px; padding: 20px; margin-top: 16px; position: relative; overflow: hidden;
+    box-shadow: 0 18px 30px -18px rgba(10,50,94,.7);
   }
-  .ref-box .ref { font-size: 1.3rem; font-weight: 700; color: var(--primary-dark); letter-spacing: 1px; }
+  .ref-box::after { content: ''; position: absolute; right: -40px; top: -40px; width: 140px; height: 140px; border-radius: 50%; background: radial-gradient(circle, rgba(249,226,11,.45), transparent 65%); }
+  .ref-box > div:first-child { color: var(--cyan) !important; text-transform: uppercase; letter-spacing: .14em; font-weight: 700; font-size: .72rem !important; }
+  .ref-box .ref { font-size: 1.6rem; font-weight: 800; color: #fff; letter-spacing: 2px; margin-top: 4px; }
+  .no-print > .btn, .no-print > button { flex: 1 1 160px; margin-top: 0; }
   @media print { .navbar, .no-print { display: none !important; } }
 </style>
 </head>
 <body class="app">
   <script src="js/nav.js"></script>
 
-  <div class="container" style="max-width: 480px;">
+  <div class="container" style="max-width: 600px;">
     <div class="card">
       <div id="content"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
     </div>
@@ -81,7 +85,7 @@
           <div id="paySection" class="no-print"></div>
           <div id="reviewSection" class="no-print"></div>
 
-          <div class="no-print" style="display:flex; gap:10px; margin-top:16px;">
+          <div class="no-print" style="display:flex; flex-wrap:wrap; gap:10px; margin-top:16px;">
                         ${receiptReady ? '<button type="button" class="secondary" onclick="window.print()">Print Receipt</button>' : ''}
             <a href="dashboard.html" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Go to Dashboard</a>
             <a href="booking-status.html?reference=${encodeURIComponent(b.referenceNumber)}" class="btn" style="display:flex; align-items:center; justify-content:center; text-decoration:none;">Check Status</a>
@@ -89,6 +93,11 @@
         `;
         renderPayment(b);
         renderReview(b);
+        // a little celebration the first time you land on a new booking
+        if (['pending', 'confirmed'].includes(b.status) && !sessionStorage.getItem('cele-' + b._id)) {
+          sessionStorage.setItem('cele-' + b._id, '1');
+          confetti();
+        }
       } catch (err) {
         el.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
       }

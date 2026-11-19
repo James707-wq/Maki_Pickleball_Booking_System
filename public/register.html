@@ -10,57 +10,78 @@
 <meta name="theme-color" content="#0a325e" />
 </head>
 <body class="auth">
-  <div class="navbar">
-    <a class="brand" href="index.html" aria-label="MAKI's Pickleball Court home">
-      <img src="img/logo-mark.png" alt="" />
-      <span class="wm"><b>MAKI'S</b><span>PICKLEBALL COURT</span></span>
-    </a>
-    <div class="links"><a href="index.html">Log in</a></div>
-  </div>
-
-  <div class="container">
-    <div class="card">
-      <div class="logo-banner"><img src="img/logo.png" alt="MAKI's Pickleball Court" /></div>
-      <h1>Create your account</h1>
-      <p class="subtitle">Book courts and manage your schedule</p>
-
-      <form id="registerForm">
-        <div class="row-2">
-          <div>
-            <label for="firstName">First name</label>
-            <input type="text" id="firstName" required />
-          </div>
-          <div>
-            <label for="lastName">Last name</label>
-            <input type="text" id="lastName" required />
-          </div>
-        </div>
-
-        <label for="email">Email</label>
-        <input type="email" id="email" required />
-
-        <label for="phone">Phone (optional)</label>
-        <input type="tel" id="phone" />
-
-        <label for="password">Password</label>
-        <input type="password" id="password" minlength="8" required />
-
-        <label for="confirmPassword">Confirm password</label>
-        <input type="password" id="confirmPassword" minlength="8" required />
-
-        <button type="submit">Create Account</button>
-        <div id="msg" class="msg"></div>
-      </form>
-
-      <div class="links-row">
-        <span></span>
-        <a href="index.html">Already have an account?</a>
+  <main class="auth-shell">
+    <aside class="auth-visual">
+      <img class="bgimg" src="img/courts/court-3.jpg" alt="" />
+      <a class="av-brand" href="index.html"><span class="mark"><img src="img/logo-mark.png" alt="" /></span><span>MAKI'S<small>PICKLEBALL COURT</small></span></a>
+      <div>
+        <h2>Your next rally<br>starts <em>here.</em></h2>
+        <p>Create a free account to book courts, track your games and get reminders.</p>
+        <div class="float-chips"><span class="float-chip">⚡ Book in <b>30 sec</b></span><span class="float-chip">🎾 Real-time slots</span><span class="float-chip">🔔 Smart reminders</span></div>
       </div>
-    </div>
-  </div>
+    </aside>
+    <section class="auth-panel">
+      <div class="auth-card">
+
+          <span class="eyebrow">🎉 Join the club</span>
+          <h1>Create your account</h1>
+          <p class="subtitle">It takes less than a minute. You can design your avatar right after.</p>
+
+          <form id="registerForm">
+            <div class="row-2">
+              <div>
+                <label for="firstName">First name</label>
+                <input type="text" id="firstName" placeholder="Juan" autocomplete="given-name" required />
+              </div>
+              <div>
+                <label for="lastName">Last name</label>
+                <input type="text" id="lastName" placeholder="Dela Cruz" autocomplete="family-name" required />
+              </div>
+            </div>
+
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required />
+
+            <label for="phone">Phone (optional)</label>
+            <input type="tel" id="phone" placeholder="09XX XXX XXXX" autocomplete="tel" />
+
+            <label for="password">Password</label>
+            <input type="password" id="password" minlength="8" placeholder="At least 8 characters" autocomplete="new-password" required />
+            <div class="strength" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="strength-label" id="strengthLabel"></div>
+
+            <label for="confirmPassword">Confirm password</label>
+            <input type="password" id="confirmPassword" minlength="8" placeholder="Type it again" autocomplete="new-password" required />
+
+            <button type="submit" class="cta" id="regBtn">Create account <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <div id="msg" class="msg"></div>
+          </form>
+
+          <div class="links-row">
+            <span></span>
+            <a href="index.html">Already have an account?</a>
+          </div>
+      </div>
+    </section>
+  </main>
 
   <script src="js/api.js"></script>
   <script>
+    // password strength meter
+    (function () {
+      const pw = document.getElementById('password'), bars = document.querySelectorAll('.strength i'), label = document.getElementById('strengthLabel');
+      const colors = ['#ef4444', '#f59e0b', '#22c38e', '#0b4fa8'], words = ['Too weak', 'Okay', 'Good', 'Strong'];
+      pw.addEventListener('input', () => {
+        const v = pw.value;
+        let score = 0;
+        if (v.length >= 8) score++;
+        if (/[A-Z]/.test(v) && /[a-z]/.test(v)) score++;
+        if (/\d/.test(v)) score++;
+        if (/[^A-Za-z0-9]/.test(v) || v.length >= 12) score++;
+        bars.forEach((b, i) => { b.style.background = v && i < score ? colors[Math.max(score - 1, 0)] : ''; });
+        label.textContent = v ? words[Math.max(score - 1, 0)] : '';
+      });
+    })();
+
     document.getElementById('registerForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const msg = document.getElementById('msg');
@@ -71,6 +92,8 @@
         return showMsg(msg, 'Passwords do not match');
       }
 
+      const btn = document.getElementById('regBtn');
+      btn.disabled = true; btn.classList.add('is-busy');
       try {
         const data = await apiRequest('/auth/register', {
           method: 'POST',
@@ -83,9 +106,10 @@
           },
         });
         localStorage.setItem('token', data.token);
-        window.location.href = 'dashboard.html';
+        window.location.href = 'profile.html?welcome=1#avatar';
       } catch (err) {
         showMsg(msg, err.message);
+        btn.disabled = false; btn.classList.remove('is-busy');
       }
     });
   </script>

@@ -65,7 +65,8 @@
 
   <div class="container" style="max-width: 960px;">
     <div class="card">
-      <h1 style="margin-top:0;">My Bookings</h1>
+      <span class="eyebrow">Your games</span>
+      <h1>My Bookings</h1>
       <p class="subtitle">View upcoming bookings, review your history, and manage changes or cancellations.</p>
       <label for="statusFilter">Filter bookings by status</label>
       <select id="statusFilter">
@@ -80,12 +81,12 @@
     </div>
 
     <div class="card" style="margin-top:18px;">
-      <h2>Upcoming & current</h2>
+      <h2>⏳ Upcoming &amp; current</h2>
       <div id="upcomingList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
     </div>
 
     <div class="card" style="margin-top:18px;">
-      <h2>Booking history</h2>
+      <h2>📜 Booking history</h2>
       <div id="historyList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
     </div>
   </div>
@@ -197,7 +198,7 @@
     function renderList(containerId, bookings) {
       const el = document.getElementById(containerId);
       if (!bookings.length) {
-        el.innerHTML = '<div class="empty">No bookings in this section yet.</div>';
+        el.innerHTML = '<div class="empty-state"><div class="ill">🏓</div>No bookings in this section yet.</div>';
         return;
       }
 

@@ -42,7 +42,7 @@ router.get('/me', (req, res) => {
   const u = req.user;
   res.json({
     success: true,
-    user: { id: u._id, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role },
+    user: { id: u._id, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role, avatar: u.avatar },
     permissions: PERMISSIONS[u.role] || [],
   });
 });

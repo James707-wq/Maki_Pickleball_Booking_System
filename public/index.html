@@ -10,37 +10,56 @@
 <meta name="theme-color" content="#0a325e" />
 </head>
 <body class="auth">
-  <div class="container">
-    <p class="auth-tag"><b>Play more. Wait less.</b><span>Book your pickleball court in seconds.</span></p>
-    <div class="card">
-      <div class="logo-banner"><img src="img/logo.png" alt="MAKI's Pickleball Court" /></div>
-      <h1>Welcome back</h1>
-      <p class="subtitle">Log in to manage your bookings</p>
-
-      <form id="loginForm">
-        <label for="email">Email</label>
-        <input type="email" id="email" required />
-
-        <label for="password">Password</label>
-        <input type="password" id="password" required />
-
-        <button type="submit">Log In</button>
-        <div id="msg" class="msg"></div>
-      </form>
-
-      <div class="links-row">
-        <a href="forgot-password.html">Forgot password?</a>
-        <a href="register.html">Create an account</a>
+  <main class="auth-shell">
+    <aside class="auth-visual">
+      <img class="bgimg" src="img/courts/court-5.jpg" alt="" />
+      <a class="av-brand" href="index.html"><span class="mark"><img src="img/logo-mark.png" alt="" /></span><span>MAKI'S<small>PICKLEBALL COURT</small></span></a>
+      <div>
+        <h2>Play more.<br><em>Wait less.</em></h2>
+        <p>Grab a court, pick a time and get on the court — all in a few taps.</p>
+        <div class="float-chips"><span class="float-chip">⚡ Book in <b>30 sec</b></span><span class="float-chip">🎾 Real-time slots</span><span class="float-chip">🔔 Smart reminders</span></div>
       </div>
-      <p style="text-align:center; font-size:0.8rem; margin:16px 0 0;"><a href="admin-login.html" style="color:var(--muted);">Staff sign in</a></p>
-    </div>
-  </div>
+    </aside>
+    <section class="auth-panel">
+      <div class="auth-card">
 
+          <div class="hello-av" id="helloAv" hidden></div>
+          <span class="eyebrow">👋 Good to see you</span>
+          <h1>Welcome back</h1>
+          <p class="subtitle">Log in to book courts and manage your games.</p>
+
+          <form id="loginForm">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com" autocomplete="username" required />
+
+            <label for="password">Password</label>
+            <input type="password" id="password" placeholder="Your password" autocomplete="current-password" required />
+
+            <button type="submit" id="loginBtn">Log in <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <div id="msg" class="msg"></div>
+          </form>
+
+          <div class="links-row">
+            <a href="forgot-password.html">Forgot password?</a>
+            <a href="register.html">Create an account</a>
+          </div>
+          <a class="staff-link" href="admin-login.html">Staff &amp; admin sign in →</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/avatar.js"></script>
   <script src="js/api.js"></script>
+  <script>
+    // returning player? greet them with their own avatar
+    (function () { const a = MakiAvatar.cached(); if (a) { const el = document.getElementById('helloAv'); el.innerHTML = MakiAvatar.svg(a, { size: 64 }); el.hidden = false; } })();
+  </script>
   <script>
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const msg = document.getElementById('msg');
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true; btn.classList.add('is-busy');
       try {
         const data = await apiRequest('/auth/login', {
           method: 'POST',
@@ -53,6 +72,7 @@
         window.location.href = 'dashboard.html';
       } catch (err) {
         showMsg(msg, err.message);
+        btn.disabled = false; btn.classList.remove('is-busy');
       }
     });
   </script>
