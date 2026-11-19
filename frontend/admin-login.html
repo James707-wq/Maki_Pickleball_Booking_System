@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Admin sign in - MAKI's PickleBall Court</title>
+<title>Staff sign in - MAKI's PickleBall Court</title>
 <link rel="stylesheet" href="css/admin.css" />
 <link rel="icon" type="image/png" href="img/favicon-32.png" />
 <link rel="apple-touch-icon" href="img/favicon.png" />
@@ -17,8 +17,8 @@
 
     <section class="login-form">
       <form id="loginForm" novalidate aria-describedby="msg">
-        <h2>Sign in to admin</h2>
-        <p class="muted login-sub">Staff and administrator accounts only.</p>
+        <h2>Staff sign in</h2>
+        <p class="muted login-sub">For staff and administrator accounts. Use the email and password the facility gave you.</p>
 
         <!-- Google Sign-In: shown only when it is set up and switched on -->
         <div id="googleBox" class="oauth" hidden>
@@ -57,7 +57,7 @@
     const btn = $('submitBtn');
 
     /* ---------- small helpers ---------- */
-    const showError = (t) => { msg.textContent = t; msg.classList.remove('hidden'); };
+    const showError = (t) => { msg.textContent = t; msg.className = 'msg error'; };
     const clearError = () => msg.classList.add('hidden');
     const busy = (on, text) => {
       form.classList.toggle('is-busy', on);
@@ -72,7 +72,13 @@
       s.onload = resolve; s.onerror = () => reject(new Error('load failed'));
       document.head.appendChild(s);
     });
-    const signedIn = (token) => { localStorage.setItem(KEY, token); location.replace('admin.html'); };
+    const signedIn = (token) => { localStorage.setItem(KEY, token); location.replace(window.PAGE('admin')); };
+
+    // why the last session ended (signed out elsewhere, ended by an admin, password changed, expired)
+    try {
+      const why = sessionStorage.getItem('adminSignedOutReason');
+      if (why) { sessionStorage.removeItem('adminSignedOutReason'); msg.textContent = why; msg.className = 'msg note'; }
+    } catch (e) { /* storage off */ }
 
     // Turn server and network failures into plain messages.
     async function post(path, body) {
@@ -95,7 +101,7 @@
       if (!t) return;
       try {
         const r = await fetch(API + '/admin/me', { headers: { Authorization: 'Bearer ' + t } });
-        if (r.ok) location.replace('admin.html');
+        if (r.ok) location.replace(window.PAGE('admin'));
         else localStorage.removeItem(KEY);
       } catch (e) { /* stay on the sign-in page */ }
     })();

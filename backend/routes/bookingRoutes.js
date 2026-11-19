@@ -1,11 +1,12 @@
 const express = require('express');
-const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Court = require('../models/Court');
 const Promotion = require('../models/Promotion');
+const Settings = require('../models/Settings');
 const { protect } = require('../middleware/auth');
 const U = require('../utils/bookingUtils');
+const P = require('../utils/policy'); // AF-136 booking rules, AF-137 cancellation policy
 const handleError = require('../utils/handleError');
 const C = require('../utils/concurrency');
 
@@ -22,11 +23,7 @@ router.param('id', (req, res, next, id) => {
   next();
 });
 
-const generateReferenceNumber = () => {
-  const stamp = Date.now().toString(36).toUpperCase();
-  const rand = crypto.randomBytes(2).toString('hex').toUpperCase();
-  return `MKI-${stamp}-${rand}`;
-};
+// booking references come from U.newReference() (shared with walk-in bookings)
 
 /**
  * UF-116 Court Booking / UF-117 Details / UF-120 Reference / UF-121 Payment Status
@@ -64,7 +61,8 @@ router.get('/', async (req, res) => {
       bookings = bookings.filter((booking) => U.endInstant(booking) > new Date());
     }
 
-    res.json({ success: true, bookings });
+    // the cancellation policy, so the page can say until when each booking can still be cancelled or moved
+    res.json({ success: true, bookings, policy: P.publicView(await Settings.get()) });
   } catch (err) {
     handleError(res, err);
   }
@@ -109,6 +107,17 @@ router.post('/', async (req, res) => {
     const check = await U.validateSlot(court, date, startTime);
     if (!check.ok) return res.status(check.code).json({ success: false, message: check.message });
 
+    // AF-136 booking rules: how far ahead, how much notice, how many upcoming bookings one customer may hold
+    const rules = P.rulesOf(await Settings.get());
+    const now = new Date();
+    const ruleProblem = P.bookingProblem(rules, new Date(check.bookingDate.getTime() + check.startMin * 60000), now);
+    if (ruleProblem) return res.status(400).json({ success: false, message: ruleProblem });
+    if (rules.maxUpcomingPerCustomer) {
+      const mine = await Booking.find({ user: req.user._id, status: { $in: ['pending', 'confirmed'] }, date: { $gte: U.manilaMidnight(U.toDateStr(now)) } }).select('date endTime');
+      const limitProblem = P.upcomingProblem(rules, mine.filter((b) => U.endInstant(b) > now).length);
+      if (limitProblem) return res.status(400).json({ success: false, message: limitProblem });
+    }
+
     // AF-127: optional promo code. Usage is claimed atomically so a limited promo can't be over-used.
     let totalFee = check.totalFee;
     let discount = 0;
@@ -139,7 +148,7 @@ router.post('/', async (req, res) => {
       date: check.bookingDate,
       startTime,
       endTime: check.endTime,
-      referenceNumber: generateReferenceNumber(),
+      referenceNumber: U.newReference(),
       totalFee,
       discount,
       promoCode,
@@ -163,6 +172,8 @@ router.post('/', async (req, res) => {
       `Booking ${booking.referenceNumber} received for ${court.name} on ${date}, ${startTime}. It will be confirmed once the facility approves it.`,
       { subject: `Booking received: ${court.name}, ${date} ${startTime}`, booking }
     );
+    await U.notifyStaff(`New booking: ${req.user.firstName} ${req.user.lastName} booked ${court.name} on ${date}, ${startTime}-${booking.endTime} (${booking.referenceNumber}). It is waiting for approval.`,
+      'bookings', { link: `#/bookings?q=${booking.referenceNumber}` });
 
     res.status(201).json({ success: true, booking });
   } catch (err) {
@@ -177,7 +188,7 @@ router.post('/', async (req, res) => {
 router.post('/:id/payment-proof', async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
-    if (!booking || booking.user.toString() !== req.user._id.toString()) {
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
     C.assertFresh(req, booking, 'booking');
@@ -192,46 +203,87 @@ router.post('/:id/payment-proof', async (req, res) => {
     if (!method || !reference) {
       return res.status(400).json({ success: false, message: 'Choose how you paid and enter the reference number' });
     }
-    booking.paymentMethod = method;
+    // AF-136 payment settings: only the methods the facility accepts (same spelling as the admin wrote it)
+    const accepted = P.rulesOf(await Settings.get()).paymentMethods;
+    const match = accepted.find((m) => m.toLowerCase() === method.toLowerCase());
+    if (!match) {
+      return res.status(400).json({ success: false, message: `Choose one of the payment methods the facility accepts: ${accepted.join(', ')}. Reload the page if the list looks different.` });
+    }
+    booking.paymentMethod = match;
     booking.paymentReference = reference;
     booking.paymentSubmittedAt = new Date();
     booking.paymentStatus = 'pending'; // a rejected payment goes back into the queue
     booking.paymentNote = '';
     await booking.save();
     await U.notify(req.user._id, `We received your payment details for booking ${booking.referenceNumber}. Staff will verify them shortly.`);
+    await U.notifyStaff(`Payment to verify: ${req.user.firstName} ${req.user.lastName} sent ${match} reference ${reference} for booking ${booking.referenceNumber} (₱${booking.totalFee}).`,
+      'payments', { link: '#/verify' });
     res.json({ success: true, booking });
   } catch (err) {
     handleError(res, err);
   }
 });
 
-/** UF-123..UF-126 - customer booking management */
+/**
+ * AF-137 - what cancelling would mean right now, before the customer confirms:
+ * GET /api/bookings/:id/cancel-check -> { canCancel, message, paid, refund, totalFee, rule }
+ */
+router.get('/:id/cancel-check', async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+    const check = P.cancelCheck(await Settings.get(), booking);
+    res.json({ success: true, canCancel: check.ok, message: check.message || '', paid: check.paid, refund: check.refund, totalFee: booking.totalFee, rule: check.rule });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
+ * UF-123..UF-126 - customer booking management. Cancelling follows the cancellation policy (AF-137).
+ * A paid booking stays "paid" and goes to Payments -> Refunds with what the policy says to give back
+ * (refundDue); it becomes "refunded" only when staff record the refund there (AF-122), which also
+ * writes it to Transaction history and tells the customer.
+ */
 router.patch('/:id/cancel', async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
-    if (!booking || booking.user.toString() !== req.user._id.toString()) {
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
     C.assertFresh(req, booking, 'booking');
-    if (!['pending', 'confirmed'].includes(booking.status)) {
-      return res.status(400).json({ success: false, message: 'Only pending or confirmed bookings can be cancelled' });
-    }
+    const check = P.cancelCheck(await Settings.get(), booking);
+    if (!check.ok) return res.status(check.code).json({ success: false, message: check.message });
 
-    const reason = String(req.body.reason || 'Customer cancelled this booking').trim() || 'Customer cancelled this booking';
+    const reason = String(req.body.reason || 'Customer cancelled this booking').trim().slice(0, 200) || 'Customer cancelled this booking';
     booking.status = 'cancelled';
     booking.statusReason = reason;
     booking.statusChangedAt = new Date();
     booking.statusChangedBy = req.user._id;
-    if (booking.paymentStatus === 'paid') booking.paymentStatus = 'refunded';
+    if (check.paid) {
+      booking.refundDue = check.refund;
+      booking.refundRule = check.rule;
+    }
     await booking.save();
 
-    const refundNote = booking.paymentStatus === 'refunded' ? ' Your payment will be refunded.' : '';
+    let refundNote = '';
+    if (check.paid && check.refund > 0) {
+      refundNote = check.refund < booking.totalFee
+        ? ` Under the cancellation policy you get ${P.peso(check.refund)} of your ${P.peso(booking.totalFee)} back; the facility will send it to you.`
+        : ` Your payment of ${P.peso(check.refund)} will be refunded by the facility.`;
+    } else if (check.paid) {
+      refundNote = ' Under the cancellation policy, a cancellation this close to the start time is not refunded.';
+    }
     await U.notify(req.user._id, `Cancelled: your booking ${booking.referenceNumber} for ${booking.courtName} on ${U.toDateStr(booking.date)} at ${booking.startTime} was cancelled. Reason: ${reason}.${refundNote}`);
-    // tell the facility: the slot is free again, and a paid booking needs its money returned
+    // tell the facility: the slot is free again, and a paid booking may need money returned
     const who = [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') || req.user.email;
-    const staffRefund = booking.paymentStatus === 'refunded' ? ` It was paid (₱${booking.totalFee}): please return the payment to the customer.` : '';
-    await U.notifyStaff(`Customer cancelled: ${who} cancelled booking ${booking.referenceNumber} (${booking.courtName}, ${U.toDateStr(booking.date)} ${booking.startTime}-${booking.endTime}). Reason: ${reason}.${staffRefund}`);
-    res.json({ success: true, booking });
+    let staffRefund = '';
+    if (check.paid && check.refund > 0) staffRefund = ` It was paid (${P.peso(booking.totalFee)}): refund ${P.peso(check.refund)} under Payments -> Refunds (${check.rule}).`;
+    else if (check.paid) staffRefund = ` It was paid (${P.peso(booking.totalFee)}); no refund is due under the cancellation policy (${check.rule}).`;
+    await U.notifyStaff(`Customer cancelled: ${who} cancelled booking ${booking.referenceNumber} (${booking.courtName}, ${U.toDateStr(booking.date)} ${booking.startTime}-${booking.endTime}). Reason: ${reason}.${staffRefund}`, 'bookings', { link: staffRefund ? '#/refunds' : `#/bookings?q=${booking.referenceNumber}` });
+    res.json({ success: true, booking, refund: check.refund, rule: check.rule });
   } catch (err) {
     handleError(res, err);
   }
@@ -269,6 +321,7 @@ router.post('/:id/checkin', async (req, res) => {
     if (!updated) {
       return res.status(409).json({ success: false, message: 'This booking has already been checked in' });
     }
+    require('../utils/integrations/webhook').queueChange(updated, 'booking.checked_in', { checkedInAt: [null, checkedInAt] });
 
     res.json({ success: true, booking: updated });
   } catch (err) {
@@ -279,13 +332,13 @@ router.post('/:id/checkin', async (req, res) => {
 router.patch('/:id/reschedule', async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
-    if (!booking || booking.user.toString() !== req.user._id.toString()) {
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
     C.assertFresh(req, booking, 'booking');
-    if (!['pending', 'confirmed'].includes(booking.status)) {
-      return res.status(400).json({ success: false, message: 'Only pending or confirmed bookings can be rescheduled' });
-    }
+    const rules = P.rulesOf(await Settings.get());
+    const allowed = P.rescheduleCheck(rules, booking); // AF-137: until how long before the start
+    if (!allowed.ok) return res.status(allowed.code).json({ success: false, message: allowed.message });
 
     const { date, startTime, courtId } = req.body;
     const targetCourtId = courtId || booking.court.toString();
@@ -303,6 +356,9 @@ router.patch('/:id/reschedule', async (req, res) => {
     if (!check.ok) {
       return res.status(check.code).json({ success: false, message: check.message });
     }
+    // AF-136: the new time follows the same booking rules as a new booking
+    const ruleProblem = P.bookingProblem(rules, new Date(check.bookingDate.getTime() + check.startMin * 60000));
+    if (ruleProblem) return res.status(400).json({ success: false, message: ruleProblem });
     // the customer can't move onto a time they already hold on another court
     const ownClash = await Booking.findOne({
       user: req.user._id, _id: { $ne: booking._id }, date: check.bookingDate, startTime: targetStart,
@@ -334,6 +390,8 @@ router.patch('/:id/reschedule', async (req, res) => {
     await U.commitScheduleOrUndo(court, () => Booking.updateOne({ _id: booking._id, writeTS: booking.writeTS }, { $set: before }));
 
     await U.notify(req.user._id, `Your booking ${booking.referenceNumber} was rescheduled to ${court.name} on ${targetDate} at ${targetStart}. It will be confirmed once the facility approves the new time.`);
+    await U.notifyStaff(`Schedule change: ${req.user.firstName} ${req.user.lastName} moved booking ${booking.referenceNumber} from ${before.courtName}, ${U.toDateStr(before.date)} ${before.startTime} to ${court.name}, ${targetDate} ${targetStart}. It is waiting for approval again.`,
+      'bookings', { link: `#/bookings?q=${booking.referenceNumber}` });
     res.json({ success: true, booking });
   } catch (err) {
     handleError(res, err);
@@ -362,7 +420,7 @@ router.post('/:id/pay-online', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Online payment is not available right now. You can pay at the facility.' });
     }
     const booking = await Booking.findById(req.params.id);
-    if (!booking || booking.user.toString() !== req.user._id.toString()) {
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
     const { hitpay: link } = await hitpay.ensurePaymentLink(booking, { by: req.user._id });
@@ -378,7 +436,7 @@ router.post('/:id/pay-online/check', async (req, res) => {
   try {
     const hitpay = require('../utils/integrations/hitpay');
     const booking = await Booking.findById(req.params.id);
-    if (!booking || booking.user.toString() !== req.user._id.toString()) {
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
     if (!booking.hitpay || !booking.hitpay.requestId || booking.paymentStatus === 'paid') {
@@ -406,7 +464,7 @@ router.get('/:id/checkin-code', async (req, res) => {
     const { isActive } = require('../utils/integrations');
     if (!(await isActive('qrCheckin'))) return res.status(404).json({ success: false, message: 'QR check-in is not available' });
     const booking = await Booking.findById(req.params.id).select('user status');
-    if (!booking || booking.user.toString() !== req.user._id.toString()) {
+    if (!booking || String(booking.user || '') !== String(req.user._id)) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
     if (booking.status !== 'confirmed') return res.status(400).json({ success: false, message: 'The QR code appears once your booking is confirmed' });
@@ -421,7 +479,7 @@ router.get('/:id', async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id).populate('court', 'name location pricePerHour');
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (booking.user.toString() !== req.user._id.toString()) {
+    if (String(booking.user || '') !== String(req.user._id)) {
       return res.status(403).json({ success: false, message: 'Not authorized to view this booking' });
     }
     res.json({ success: true, booking });

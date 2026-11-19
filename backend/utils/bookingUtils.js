@@ -6,6 +6,8 @@ const User = require('../models/User');
 const { PERMISSIONS } = require('../config/permissions');
 const { nextTimestamp, WriteConflictError } = require('./concurrency');
 
+const webhook = () => require('./integrations/webhook'); // custom API events for changes made without a save
+
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'completed'];
 const MANILA_OFFSET_MS = 8 * 60 * 60 * 1000; // Philippines is UTC+8, no DST
 
@@ -38,6 +40,17 @@ const slotStarts = (open, close, step) => {
 
 const EXPIRED_REASON = 'Expired: it was not approved before the booking time';
 
+/** A new booking reference, e.g. MKI-MX3K2P-7F1A (online and walk-in bookings alike). */
+const newReference = () => `MKI-${Date.now().toString(36).toUpperCase()}-${require('crypto').randomBytes(2).toString('hex').toUpperCase()}`;
+
+/** Who a booking is for: the account's name, a walk-in guest's name, or "Deleted user". `user` may be populated. */
+function customerName(b) {
+  const u = b && b.user;
+  if (u && u.firstName !== undefined) return `${u.firstName} ${u.lastName}`.trim();
+  if (b && b.walkIn && b.walkIn.name) return `${b.walkIn.name} (walk-in)`;
+  return u ? 'Customer' : 'Deleted user';
+}
+
 /**
  * Tidies bookings whose time has passed:
  *  - confirmed -> completed
@@ -48,22 +61,29 @@ async function autoCompleteBookings(extra = {}) {
   const now = new Date();
   const candidates = await Booking.find({ status: 'confirmed', date: { $lte: now }, ...extra }).select('date endTime');
   const ids = candidates.filter((b) => endInstant(b) <= now).map((b) => b._id);
-  // status is re-checked inside the update: a booking cancelled after we read it must not become "completed"
-  if (ids.length) await Booking.updateMany({ _id: { $in: ids }, status: 'confirmed' }, { status: 'completed' });
+  // status is re-checked inside the update: a booking cancelled after we read it must not become "completed".
+  // One at a time, so exactly one caller sees each booking change and tells the custom API (webhook).
+  for (const id of ids) {
+    const done = await Booking.updateOne({ _id: id, status: 'confirmed' }, { status: 'completed' });
+    if (done.modifiedCount) webhook().queueChangeById(id, 'booking.completed', { status: ['confirmed', 'completed'] });
+  }
 
   const pending = await Booking.find({ status: 'pending', date: { $lte: now }, ...extra })
-    .select('date startTime user referenceNumber courtName paymentStatus');
+    .select('date startTime user referenceNumber courtName paymentStatus totalFee');
   for (const b of pending.filter((x) => startInstant(x) <= now)) {
     // only one caller may expire it (several pages can trigger this at once)
+    // a paid one is owed a full refund (AF-137): it waits under Payments -> Refunds
+    const owed = b.paymentStatus === 'paid' && b.totalFee > 0 ? { refundDue: b.totalFee, refundRule: 'Expired without approval: full refund' } : {};
     const done = await Booking.updateOne(
       { _id: b._id, status: 'pending' },
-      { $set: { status: 'cancelled', slotActive: false, statusReason: EXPIRED_REASON, statusChangedAt: now } }
+      { $set: { status: 'cancelled', slotActive: false, statusReason: EXPIRED_REASON, statusChangedAt: now, ...owed } }
     );
     if (!done.modifiedCount) continue;
+    webhook().queueChangeById(b._id, 'booking.cancelled', { status: ['pending', 'cancelled'] });
     await notify(b.user, `Booking ${b.referenceNumber} (${b.courtName}, ${toDateStr(b.date)} ${b.startTime}) expired because it was not approved in time. Please book another slot.`,
       { subject: `Booking ${b.referenceNumber} expired` });
     if (b.paymentStatus === 'paid') {
-      await notifyStaff(`Booking ${b.referenceNumber} expired without approval but was already paid. Please refund the customer.`);
+      await notifyStaff(`Booking ${b.referenceNumber} expired without approval but was already paid. Please refund the customer.`, 'payments', { link: '#/refunds' });
     }
   }
 }
@@ -106,7 +126,7 @@ async function validateSlot(court, date, startTime, { excludeBookingId = null, a
   if (!isDateStr(date) || typeof startTime !== 'string' || !TIME_RE.test(startTime)) {
     return fail(400, 'Invalid date or start time');
   }
-  if (court.status !== 'available') return fail(400, `This court is currently ${court.status}`);
+  if (court.status !== 'available') return fail(400, `This court is currently ${court.status === 'maintenance' ? 'under maintenance' : court.status}`);
 
   const openMin = toMinutes(court.openTime);
   const closeMin = toMinutes(court.closeTime);
@@ -143,12 +163,13 @@ async function validateSlot(court, date, startTime, { excludeBookingId = null, a
 
 /**
  * Creates an in-app notification; never lets a notification failure break the main action.
- * With `outside` ({ subject, booking, attachIcs }) the customer also gets it by SMS / email when those
- * are switched on - sent in the background so the request never waits on them.
+ * With `outside` ({ subject, booking, attachIcs }) the customer also gets it by email when email is
+ * switched on - sent in the background so the request never waits on it.
  */
-async function notify(userId, message, outside) {
+async function notify(userId, message, outside, { link } = {}) {
+  if (!userId) return; // a walk-in guest has no account to notify
   try {
-    await Notification.create({ user: userId, message });
+    await Notification.create({ user: userId, message, ...(link ? { link } : {}) });
   } catch (err) {
     console.error('Notification failed:', err.message);
   }
@@ -158,19 +179,49 @@ async function notify(userId, message, outside) {
   }
 }
 
-/** Notifies every active staff/admin account that manages bookings. Never throws. */
-async function notifyStaff(message) {
+/**
+ * Notifies every active staff/admin account whose role has `perm` (default: managing bookings). Never throws.
+ * except: the account that caused it (not told about its own action); link: where the alert leads (#/...).
+ */
+async function notifyStaff(message, perm = 'bookings', { except, link } = {}) {
   try {
-    const roles = Object.keys(PERMISSIONS).filter((r) => PERMISSIONS[r].includes('bookings'));
-    const staff = await User.find({ role: { $in: roles }, isActive: { $ne: false } }).select('_id');
-    if (staff.length) await Notification.insertMany(staff.map((u) => ({ user: u._id, message })));
+    const roles = Object.keys(PERMISSIONS).filter((r) => PERMISSIONS[r].includes(perm) && r !== 'user');
+    const filter = { role: { $in: roles }, isActive: { $ne: false } };
+    if (except) filter._id = { $ne: except };
+    const staff = await User.find(filter).select('_id');
+    if (staff.length) await Notification.insertMany(staff.map((u) => ({ user: u._id, message, ...(link ? { link } : {}) })));
   } catch (err) {
     console.error('Staff notification failed:', err.message);
   }
 }
 
+/**
+ * A court's slots on one day (YYYY-MM-DD): [{ startTime, endTime, status }], status available | booked | blocked | past.
+ * Shared by the customer site (GET /api/courts/:id/availability) and the API for other systems (GET /api/v1/...).
+ */
+async function daySlots(court, date) {
+  const dayStart = manilaMidnight(date);
+  const [bookings, blocks] = await Promise.all([
+    Booking.find({ court: court._id, date: dayStart, status: { $in: ACTIVE_STATUSES } }).select('startTime'),
+    BlockedSlot.find({ court: court._id, date: dayStart }).select('startTime'),
+  ]);
+  const booked = new Set(bookings.map((b) => b.startTime));
+  const blocked = new Set(blocks.map((b) => b.startTime));
+  const now = new Date();
+  const step = court.slotDurationMinutes;
+  return slotStarts(court.openTime, court.closeTime, step).map((start) => {
+    const startTime = toHHMM(start);
+    const isPast = new Date(dayStart.getTime() + start * 60000) <= now;
+    return {
+      startTime,
+      endTime: toHHMM(start + step),
+      status: booked.has(startTime) ? 'booked' : blocked.has(startTime) ? 'blocked' : isPast ? 'past' : 'available',
+    };
+  });
+}
+
 module.exports = {
   ACTIVE_STATUSES, toMinutes, toHHMM, manilaMidnight, isDateStr, toDateStr, todayStr,
-  startInstant, endInstant, slotStarts, autoCompleteBookings, validateSlot, notify, notifyStaff,
-  commitSchedule, commitScheduleOrUndo,
+  startInstant, endInstant, slotStarts, daySlots, autoCompleteBookings, validateSlot, notify, notifyStaff,
+  commitSchedule, commitScheduleOrUndo, newReference, customerName,
 };

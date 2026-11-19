@@ -11,6 +11,11 @@ const Transaction = require('../models/Transaction');
 const Notification = require('../models/Notification');
 const Announcement = require('../models/Announcement');
    const announceCustomers = async (a, adminId) => {
+     if (a.audience === 'staff') { // SF-128: staff instructions go to the console, not to customers
+       await U.notifyStaff(`New announcement for staff: ${a.title}`, 'announcements.view', { except: adminId, link: '#/board' });
+       return;
+     }
+     if (a.audience === 'everyone') await U.notifyStaff(`New announcement: ${a.title}`, 'announcements.view', { except: adminId, link: '#/board' });
      const users = await User.find({ role: 'user', isActive: true }).distinct('_id');
      if (!users.length) return;
      const batch = `ann-${Date.now().toString(36)}`;
@@ -23,10 +28,12 @@ const AuditLog = require('../models/AuditLog');
 const LoginAttempt = require('../models/LoginAttempt');
 const L = require('../utils/loginSecurity');
 const { authorize } = require('../middleware/auth');
+const { can } = require('../config/permissions');
 const U = require('../utils/bookingUtils');
 const { logTransaction } = require('../utils/transactions');
 const handleError = require('../utils/handleError');
 const C = require('../utils/concurrency');
+const CSV = require('../utils/csv'); // AF-143 export
 
 // txRouter: every write route below runs as a timestamped transaction (abort + restart on conflict)
 const router = C.txRouter(express.Router());
@@ -102,15 +109,55 @@ router.post('/bookings/:id/verify-payment', authorize('payments'), async (req, r
 });
 
 /* ------------------------------------------------------------------ */
+/* SF-119 Receipt Generation: a printable receipt for a paid booking    */
+/* ------------------------------------------------------------------ */
+router.get('/bookings/:id/receipt', authorize('payments', 'bookings'), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return bad(res, 'Booking not found', 404);
+    const b = await withRefs(Booking.findById(req.params.id));
+    if (!b) return bad(res, 'Booking not found', 404);
+    if (!['paid', 'refunded'].includes(b.paymentStatus)) return bad(res, 'There is no receipt yet: this booking has not been paid', 409);
+    const Settings = require('../models/Settings');
+    const [s, pay, refund] = await Promise.all([
+      Settings.get(),
+      Transaction.findOne({ booking: b._id, type: 'payment' }).sort({ createdAt: -1 }).populate('recordedBy', 'firstName lastName').lean(),
+      Transaction.findOne({ booking: b._id, type: 'refund' }).sort({ createdAt: -1 }).lean(),
+    ]);
+    const staffName = (u) => (u ? `${u.firstName} ${u.lastName}`.trim() : '');
+    res.json({
+      success: true,
+      receipt: {
+        number: b.referenceNumber,
+        issuedAt: (pay && pay.createdAt) || b.paidAt || b.verifiedAt || b.updatedAt,
+        facility: { name: "MAKI's PickleBall Court", address: s.facilityAddress || '', hours: `${s.openTime}–${s.closeTime}` },
+        customer: { name: U.customerName(b), email: b.user ? b.user.email : '', phone: b.user ? b.user.phone || '' : (b.walkIn && b.walkIn.phone) || '' },
+        court: b.courtName, location: b.court && b.court.location ? b.court.location : '',
+        date: U.toDateStr(b.date), startTime: b.startTime, endTime: b.endTime,
+        fee: b.totalFee + (b.discount || 0), discount: b.discount || 0, promoCode: b.promoCode || '', total: b.totalFee,
+        method: b.paymentMethod || (pay && pay.method) || '', paymentReference: b.paymentReference || '',
+        receivedBy: staffName(pay && pay.recordedBy) || (b.source === 'desk' ? 'Front desk' : ''),
+        paymentStatus: b.paymentStatus,
+        refund: b.paymentStatus === 'refunded' ? { amount: (b.refund && b.refund.amount) || (refund && refund.amount) || b.totalFee, at: (b.refund && b.refund.at) || (refund && refund.createdAt) || null } : null,
+      },
+    });
+  } catch (err) { handleError(res, err); }
+});
+
+/* ------------------------------------------------------------------ */
 /* AF-122 Refund Management                                            */
 /* ------------------------------------------------------------------ */
+// Paid bookings that were cancelled or rejected. refundDue (AF-137) is what the cancellation policy says to give back;
+// bookings from before the policy have none, which means the full fee. A refundDue of 0 (a late cancellation the
+// policy does not refund) is listed separately, so staff can still refund it as a goodwill gesture.
 router.get('/refunds', authorize('payments'), async (req, res) => {
   try {
-    const [eligible, done] = await Promise.all([
-      withRefs(Booking.find({ paymentStatus: 'paid', status: { $in: ['cancelled', 'rejected'] } }).sort({ statusChangedAt: -1, updatedAt: -1 }).limit(100)),
+    const cancelledPaid = { paymentStatus: 'paid', status: { $in: ['cancelled', 'rejected'] }, totalFee: { $gt: 0 } };
+    const [eligible, kept, done] = await Promise.all([
+      withRefs(Booking.find({ ...cancelledPaid, refundDue: { $ne: 0 } }).sort({ statusChangedAt: -1, updatedAt: -1 }).limit(100)),
+      withRefs(Booking.find({ ...cancelledPaid, refundDue: 0 }).sort({ statusChangedAt: -1, updatedAt: -1 }).limit(50)),
       withRefs(Booking.find({ paymentStatus: 'refunded' }).sort({ 'refund.at': -1, updatedAt: -1 }).limit(100)),
     ]);
-    res.json({ success: true, eligible, done });
+    res.json({ success: true, eligible, kept, done });
   } catch (err) { handleError(res, err); }
 });
 
@@ -153,14 +200,23 @@ router.get('/transactions', authorize('payments'), async (req, res) => {
       const people = await User.find({ $or: ['firstName', 'lastName', 'email'].map((f) => ({ [f]: { $regex: safe, $options: 'i' } })) }).select('_id').limit(100);
       filter.$or = [{ referenceNumber: { $regex: safe, $options: 'i' } }, { user: { $in: people.map((p) => p._id) } }];
     }
+    if (req.query.format === 'csv') { // AF-143 export: every matching row
+      const all = await Transaction.find(filter).sort({ createdAt: -1 }).limit(CSV.MAX_ROWS).populate('user', 'firstName lastName email').populate('recordedBy', 'firstName lastName').lean();
+      const who = (u) => (u ? `${u.firstName} ${u.lastName}` : '');
+      return CSV.send(res, `Transactions ${U.todayStr()}`, ['When', 'Reference', 'Customer', 'Email', 'Type', 'Method', 'Amount (PHP)', 'Note', 'Recorded by'],
+        all.map((t) => [t.createdAt, t.referenceNumber, t.user ? who(t.user) : t.customerName ? `${t.customerName} (walk-in)` : 'Deleted user', t.user ? t.user.email : '', t.type, t.method || '', t.amount, t.note || '', who(t.recordedBy)]));
+    }
+    // staff (no analytics) get totals for a shift or a few weeks (from and to, up to 31 days), not all-time takings
+    const spanDays = filter.createdAt && filter.createdAt.$gte && filter.createdAt.$lt ? (filter.createdAt.$lt - filter.createdAt.$gte) / 864e5 : Infinity;
+    const showTotals = can(req.user.role, 'analytics') || spanDays <= 31;
     const [total, items, sums] = await Promise.all([
       Transaction.countDocuments(filter),
       Transaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).populate('user', 'firstName lastName email').populate('recordedBy', 'firstName lastName'),
-      Transaction.aggregate([{ $match: filter }, { $group: { _id: '$type', amount: { $sum: '$amount' }, n: { $sum: 1 } } }]),
+      showTotals ? Transaction.aggregate([{ $match: filter }, { $group: { _id: '$type', amount: { $sum: '$amount' }, n: { $sum: 1 } } }]) : [],
     ]);
     const totals = { payment: 0, refund: 0, failed: 0 };
     sums.forEach((s) => { totals[s._id] = s.amount; });
-    res.json({ success: true, ...paged(total, page, limit), transactions: items, totals });
+    res.json({ success: true, ...paged(total, page, limit), transactions: items, totals: showTotals ? totals : null });
   } catch (err) { handleError(res, err); }
 });
 
@@ -233,6 +289,7 @@ router.get('/notifications', authorize('notifications'), async (req, res) => {
 /* ------------------------------------------------------------------ */
 /* AF-126 Announcements Management                                     */
 /* ------------------------------------------------------------------ */
+const AUDIENCES = ['customers', 'staff', 'everyone']; // SF-128
 router.get('/announcements', authorize('announcements'), async (req, res) => {
   try {
     res.json({ success: true, announcements: await Announcement.find().sort({ createdAt: -1 }).limit(100) });
@@ -243,6 +300,7 @@ router.post('/announcements', authorize('announcements'), async (req, res) => {
     const published = req.body.published === true || req.body.published === 'true';
     const a = await Announcement.create({
       title: req.body.title, body: req.body.body, published, publishedAt: published ? new Date() : undefined, createdBy: req.user._id,
+      audience: AUDIENCES.includes(req.body.audience) ? req.body.audience : 'customers',
     });
            if (published) await announceCustomers(a, req.user._id);
     res.status(201).json({ success: true, announcement: a });
@@ -255,6 +313,7 @@ router.put('/announcements/:id', authorize('announcements'), async (req, res) =>
     C.assertFresh(req, a, 'announcement');
     if (req.body.title !== undefined) a.title = req.body.title;
     if (req.body.body !== undefined) a.body = req.body.body;
+    if (AUDIENCES.includes(req.body.audience)) a.audience = req.body.audience;
     await a.save();
     res.json({ success: true, announcement: a });
   } catch (err) { handleError(res, err); }
@@ -338,11 +397,16 @@ router.delete('/promotions/:id', authorize('promotions'), async (req, res) => {
 /* ------------------------------------------------------------------ */
 /* AF-128 Feedback Management                                          */
 /* ------------------------------------------------------------------ */
-router.get('/feedback', authorize('feedback'), async (req, res) => {
+router.get('/feedback', authorize('feedback', 'feedback.view'), async (req, res) => {
   try {
     const { page, limit, skip } = pageOf(req, 15);
     const filter = {};
+    const manages = can(req.user.role, 'feedback');
     if (['new', 'reviewed', 'hidden'].includes(req.query.status)) filter.status = req.query.status;
+    if (!manages) { // SF-129: staff read feedback, but not what an admin hid
+      if (filter.status === 'hidden') filter._id = null; // matches nothing
+      else if (!filter.status) filter.status = { $ne: 'hidden' };
+    }
     const r = Number(req.query.rating);
     if (r >= 1 && r <= 5) filter.rating = r;
     const [total, items, agg, dist] = await Promise.all([
@@ -419,25 +483,61 @@ router.get('/checkins', authorize('checkins'), async (req, res) => {
 /**
  * Front desk scans a customer's QR code (or types a reference number) - POST /api/admin/checkins/scan  { code }
  */
+/** The booking behind a scanned QR code or a typed reference: { booking } or { status, message }. */
+async function bookingFromCode(code) {
+  const { isActive } = require('../utils/integrations');
+  const { readCheckinCode } = require('../utils/integrations/qr');
+  const raw = String(code || '').trim();
+  let booking = null;
+  if (/^MKI1\./.test(raw)) {
+    if (!(await isActive('qrCheckin'))) return { status: 400, message: 'QR check-in is turned off under Integrations' };
+    const id = readCheckinCode(raw);
+    if (!id) return { status: 400, message: 'This QR code is not valid. Ask for the booking reference instead.' };
+    booking = await Booking.findById(id);
+  } else if (/^MKI-[A-Z0-9-]+$/i.test(raw)) {
+    booking = await Booking.findOne({ referenceNumber: raw.toUpperCase() });
+  } else {
+    return { status: 400, message: 'Scan a booking QR code or type a reference like MKI-...' };
+  }
+  if (!booking) return { status: 404, message: 'No booking found for that code' };
+  return { booking };
+}
+
+/**
+ * SF-113 Booking Verification - is this booking good to play now? Changes nothing.
+ * POST /api/admin/bookings/verify { code } -> { booking, verdict: { ok, level: ok|warn|bad, message } }
+ */
+router.post('/bookings/verify', authorize('checkins', 'bookings'), async (req, res) => {
+  try {
+    res.locals.noAudit = true; // only a look-up
+    const found = await bookingFromCode(req.body.code);
+    if (!found.booking) return bad(res, found.message, found.status);
+    const b = await withRefs(Booking.findById(found.booking._id));
+    const name = U.customerName(b);
+    const now = new Date();
+    const start = U.startInstant(b);
+    const end = U.endInstant(b);
+    const when = `${b.courtName}, ${U.toDateStr(b.date)} ${b.startTime}–${b.endTime}`;
+    const pay = b.paymentStatus === 'paid' ? 'paid' : b.paymentStatus === 'refunded' ? 'refunded' : 'not paid yet';
+    let verdict;
+    if (['cancelled', 'rejected'].includes(b.status)) verdict = { ok: false, level: 'bad', message: `Not valid: ${name}'s booking was ${b.status}${b.statusReason ? ` (${b.statusReason})` : ''}.` };
+    else if (b.status === 'pending') verdict = { ok: false, level: 'bad', message: `Not confirmed yet: ${name}'s booking is waiting for approval (${when}).` };
+    else if (U.toDateStr(b.date) !== U.todayStr()) verdict = { ok: false, level: 'warn', message: `Valid, but not for today: ${name} booked ${when}.` };
+    else if (end <= now) verdict = { ok: false, level: 'bad', message: `This booking ended at ${b.endTime} (${when}).` };
+    else if (b.checkedInAt) verdict = { ok: true, level: 'warn', message: `Already checked in at ${new Date(b.checkedInAt).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })}: ${name}, ${when}.` };
+    else if (start - now > 60 * 60000) verdict = { ok: true, level: 'warn', message: `Valid, starts later today at ${b.startTime}: ${name}, ${when}, ${pay}.` };
+    else verdict = { ok: true, level: 'ok', message: `Valid: ${name}, ${when}, ${pay}.` };
+    res.json({ success: true, booking: b, verdict });
+  } catch (err) { handleError(res, err); }
+});
+
 router.post('/checkins/scan', authorize('checkins'), async (req, res) => {
   try {
-    const { isActive } = require('../utils/integrations');
-    const { readCheckinCode } = require('../utils/integrations/qr');
-    const raw = String(req.body.code || '').trim();
-    let booking = null;
-    if (/^MKI1\./.test(raw)) {
-      if (!(await isActive('qrCheckin'))) return bad(res, 'QR check-in is turned off under Integrations');
-      const id = readCheckinCode(raw);
-      if (!id) return bad(res, 'This QR code is not valid. Ask for the booking reference instead.', 400);
-      booking = await Booking.findById(id);
-    } else if (/^MKI-[A-Z0-9-]+$/i.test(raw)) {
-      booking = await Booking.findOne({ referenceNumber: raw.toUpperCase() });
-    } else {
-      return bad(res, 'Scan a booking QR code or type a reference like MKI-...');
-    }
-    if (!booking) return bad(res, 'No booking found for that code', 404);
+    const found = await bookingFromCode(req.body.code);
+    if (!found.booking) return bad(res, found.message, found.status);
+    const { booking } = found;
     const who = await withRefs(Booking.findById(booking._id));
-    const name = who.user ? `${who.user.firstName} ${who.user.lastName}` : 'Customer';
+    const name = U.customerName(who);
     if (!['confirmed', 'completed'].includes(booking.status)) return bad(res, `${name}'s booking ${booking.referenceNumber} is ${booking.status}, not confirmed`);
     if (U.toDateStr(booking.date) !== U.todayStr()) return bad(res, `${name}'s booking ${booking.referenceNumber} is on ${U.toDateStr(booking.date)}, not today`);
     if (booking.checkedInAt) return bad(res, `${name} is already checked in (${booking.courtName}, ${booking.startTime})`, 409);
@@ -445,6 +545,7 @@ router.post('/checkins/scan', authorize('checkins'), async (req, res) => {
       { _id: booking._id, checkedInAt: { $exists: false } }, { $set: { checkedInAt: new Date() } }, { new: true }
     );
     if (!updated) return bad(res, `${name} is already checked in`, 409);
+    require('../utils/integrations/webhook').queueChange(updated, 'booking.checked_in', { checkedInAt: [null, updated.checkedInAt] });
     res.json({ success: true, message: `${name} checked in · ${booking.courtName}, ${booking.startTime}–${booking.endTime}`, booking: await withRefs(Booking.findById(booking._id)) });
   } catch (err) { handleError(res, err); }
 });
@@ -554,6 +655,7 @@ router.get('/analytics/users', authorize('analytics'), async (req, res) => {
     joined.forEach((u) => { const d = U.toDateStr(u.createdAt); if (d in perDay) perDay[d] += 1; });
     const per = {};
     inRange.forEach((b) => {
+      if (!b.user) return; // walk-in guests have no account to count
       const k = String(b.user);
       per[k] = per[k] || { n: 0, spent: 0 };
       per[k].n += 1;
@@ -566,7 +668,7 @@ router.get('/analytics/users', authorize('analytics'), async (req, res) => {
       success: true, from: r.from, to: r.to,
       totals: {
         total, active, inactive, newUsers: joined.length, activeBookers: Object.keys(per).length,
-        bookings: inRange.length, repeatCustomers: allTime.filter((x) => x.n > 1).length, neverBooked: Math.max(total - allTime.length, 0),
+        bookings: inRange.length, repeatCustomers: allTime.filter((x) => x._id && x.n > 1).length, neverBooked: Math.max(total - allTime.filter((x) => x._id).length, 0),
       },
       perDay: Object.entries(perDay).map(([date, count]) => ({ date, count })),
       top: top.map(([id, v]) => ({ name: nameOf[id] ? `${nameOf[id].firstName} ${nameOf[id].lastName}` : 'Deleted user', email: nameOf[id] ? nameOf[id].email : '', bookings: v.n, spent: v.spent })),
@@ -591,12 +693,13 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
 
     if (type === 'bookings' || type === 'payments') {
       const list = await Booking.find({ date: { $gte: r.gte, $lt: r.lt } }).sort({ date: 1, startTime: 1 }).populate('user', 'firstName lastName').lean();
-      const name = (b) => (b.user ? `${b.user.firstName} ${b.user.lastName}` : 'Deleted user');
+      const name = (b) => U.customerName(b);
       if (type === 'bookings') {
         report = {
           title: 'Bookings report',
           columns: ['Reference', 'Customer', 'Court', 'Date', 'Time', 'Status', 'Fee'],
-          rows: list.map((b) => [b.referenceNumber, name(b), b.courtName, U.toDateStr(b.date), `${b.startTime}-${b.endTime}`, b.status, peso(b.totalFee)]),
+          rows: list.map((b) => [b.referenceNumber, name(b), b.courtName, U.toDateStr(b.date), `${b.startTime}-${b.endTime}`, b.status, b.totalFee]),
+          money: [6],
           summary: [
             { label: 'Bookings', value: list.length },
             ...['pending', 'confirmed', 'completed', 'cancelled', 'rejected'].map((s) => ({ label: s[0].toUpperCase() + s.slice(1), value: list.filter((b) => b.status === s).length })),
@@ -608,7 +711,8 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
         report = {
           title: 'Payments report',
           columns: ['Reference', 'Customer', 'Date', 'Method', 'Payment status', 'Amount'],
-          rows: live.map((b) => [b.referenceNumber, name(b), U.toDateStr(b.date), b.paymentMethod || '-', b.paymentStatus, peso(b.totalFee)]),
+          rows: live.map((b) => [b.referenceNumber, name(b), U.toDateStr(b.date), b.paymentMethod || '-', b.paymentStatus, b.totalFee]),
+          money: [5],
           summary: [{ label: 'Paid', value: peso(sum('paid')) }, { label: 'Unpaid', value: peso(sum('pending')) }, { label: 'Failed', value: peso(sum('failed')) }, { label: 'Refunded', value: peso(sum('refunded')) }],
         };
       }
@@ -632,7 +736,8 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
       report = {
         title: 'Courts report',
         columns: ['Court', 'Location', 'Status', 'Price / hour', 'Bookings', 'Revenue'],
-        rows: courts.map((c) => [c.name, c.location, c.status, peso(c.pricePerHour), (by[String(c._id)] || { n: 0 }).n, peso((by[String(c._id)] || { rev: 0 }).rev)]),
+        rows: courts.map((c) => [c.name, c.location, c.status, c.pricePerHour, (by[String(c._id)] || { n: 0 }).n, (by[String(c._id)] || { rev: 0 }).rev]),
+        money: [3, 5],
         summary: [{ label: 'Courts', value: courts.length }, { label: 'Bookings in range', value: bks.length }],
       };
     } else {
@@ -641,11 +746,20 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
       report = {
         title: 'Transactions report',
         columns: ['When', 'Reference', 'Type', 'Method', 'Amount', 'Note'],
-        rows: tx.map((t) => [stamp(t.createdAt), t.referenceNumber, t.type, t.method || '-', peso(t.amount), t.note || '']),
+        rows: tx.map((t) => [t.createdAt, t.referenceNumber, t.type, t.method || '-', t.amount, t.note || '']),
+        money: [4],
+        dates: [0],
         summary: [{ label: 'Payments', value: peso(sum('payment')) }, { label: 'Refunds', value: peso(sum('refund')) }, { label: 'Net', value: peso(sum('payment') - sum('refund')) }],
       };
     }
-    res.json({ success: true, from: r.from, to: r.to, truncated: report.rows.length > 2000, ...report, rows: report.rows.slice(0, 2000) });
+    const money = report.money || [];
+    const dates = report.dates || [];
+    if (req.query.format === 'csv') { // AF-143 export: every row, numbers left as numbers
+      const columns = report.columns.map((c, i) => (money.includes(i) ? `${c} (PHP)` : c));
+      return CSV.send(res, `${report.title} ${r.from} to ${r.to}`, columns, report.rows.slice(0, CSV.MAX_ROWS));
+    }
+    const shown = (row) => row.map((v, i) => (money.includes(i) ? peso(v) : dates.includes(i) ? stamp(v) : v));
+    res.json({ success: true, from: r.from, to: r.to, truncated: report.rows.length > 2000, ...report, rows: report.rows.slice(0, 2000).map(shown) });
   } catch (err) { handleError(res, err); }
 });
 /* ------------------------------------------------------------------ */
@@ -699,6 +813,29 @@ router.get('/logins', authorize('logins'), async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
+/** Rate limits (middleware/rateLimits.js): the limits in use, and who hit them in the last day. */
+router.get('/rate-limits', authorize('logins'), async (req, res) => {
+  try {
+    const v = require('../middleware/rateLimits').view() || { limits: [], blocked: [] };
+    const ids = v.blocked.filter((b) => b.key.startsWith('user:')).map((b) => b.key.slice(5)).filter((id) => mongoose.isValidObjectId(id));
+    const users = ids.length ? await User.find({ _id: { $in: ids } }).select('firstName lastName email role').lean() : [];
+    const byId = new Map(users.map((u) => [String(u._id), u]));
+    res.json({
+      success: true,
+      limits: v.limits,
+      blocked: v.blocked.map((b) => {
+        const u = b.key.startsWith('user:') ? byId.get(b.key.slice(5)) : null;
+        const ip = b.key.startsWith('ip:') ? b.key.slice(3) : '';
+        return { ...b, kind: ip ? 'ip' : 'account', who: u ? `${u.firstName} ${u.lastName}`.trim() : ip || 'A deleted account', email: u ? u.email : '', role: u ? u.role : '' };
+      }),
+      trustProxy: req.app.get('trust proxy'),
+      yourIp: String(req.ip || '').replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, ''), // "::ffff:127.0.0.1" -> "127.0.0.1", like the list above
+    });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 router.patch('/users/:id/unlock', authorize('logins'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -722,6 +859,13 @@ router.get('/audit', authorize('audit'), async (req, res) => {
       filter.$or = ['actorName', 'action', 'detail', 'ip'].map((f) => ({ [f]: { $regex: safe, $options: 'i' } }));
     }
     if (U.isDateStr(req.query.date)) filter.createdAt = { $gte: U.manilaMidnight(req.query.date), $lt: new Date(U.manilaMidnight(req.query.date).getTime() + 864e5) };
+    if (['staff', 'admin'].includes(req.query.role)) filter.actorRole = req.query.role; // SF-135: e.g. only staff actions
+    if (mongoose.isValidObjectId(req.query.actor)) filter.actor = req.query.actor;
+    if (req.query.format === 'csv') { // AF-143 export: every matching entry
+      const all = await AuditLog.find(filter).sort({ createdAt: -1 }).limit(CSV.MAX_ROWS).lean();
+      return CSV.send(res, `Audit logs ${U.todayStr()}`, ['When', 'Who', 'Role', 'Action', 'Detail', 'IP address', 'Request', 'Result'],
+        all.map((l) => [l.createdAt, l.actorName, l.actorRole, l.action, l.detail || '', l.ip || '', `${l.method} ${l.path}`, l.statusCode]));
+    }
     const [total, logs] = await Promise.all([AuditLog.countDocuments(filter), AuditLog.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit)]);
     res.json({ success: true, ...paged(total, page, limit), logs });
   } catch (err) { handleError(res, err); }

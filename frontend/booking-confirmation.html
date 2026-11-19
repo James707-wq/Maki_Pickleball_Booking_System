@@ -174,8 +174,17 @@
       }
     }
 
+    // AF-136 payment settings: the methods the facility accepts and how to pay (admin -> Hours & rules)
+    let PAY = null;
+    let payShownFor = null;
+    Integrations.facility().then((f) => {
+      PAY = (f && f.rules) || null;
+      if (payShownFor && document.getElementById('payForm')) renderPayment(payShownFor);
+    });
+
     // UF-121 / AF-121: tell the facility how you paid so staff can verify it
     function renderPayment(b) {
+      payShownFor = b;
       const box = document.getElementById('paySection');
       if (['cancelled', 'rejected'].includes(b.status) || b.paymentStatus === 'refunded') { box.innerHTML = ''; return; }
       if (b.paymentStatus === 'paid') { box.innerHTML = '<p style="font-size:.85rem;color:#14633c;margin-top:12px;">✅ Payment received. Thank you!</p>'; return; }
@@ -190,8 +199,9 @@
         <form id="payForm" class="receipt" style="margin-top:16px;">
           <strong>Already paid? Send us the details</strong>
           ${b.paymentStatus === 'failed' ? `<p class="msg error" style="display:block;">Your last payment could not be verified${b.paymentNote ? ': ' + esc(b.paymentNote) : ''}. Please check and send it again.</p>` : '<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0;">You can also just pay at the facility before your time.</p>'}
+          ${PAY && PAY.paymentInstructions ? `<p class="pay-instructions">${esc(PAY.paymentInstructions)}</p>` : ''}
           <label for="payMethod">Paid with</label>
-          <select id="payMethod" required><option value="">Choose…</option><option>GCash</option><option>Maya</option><option>Bank transfer</option><option>Card</option><option>Other</option></select>
+          <select id="payMethod" required><option value="">Choose…</option>${((PAY && PAY.paymentMethods) || ['GCash', 'Maya', 'Bank transfer', 'Card', 'Other']).map((m) => `<option>${esc(m)}</option>`).join('')}</select>
           <label for="payRef">Reference number</label>
           <input id="payRef" maxlength="60" placeholder="e.g. GCash ref no." required />
           <button type="submit" class="cta" style="margin-top:12px;">Send payment details</button>

@@ -1,33 +1,10 @@
 /**
- * Customer messages outside the website: SMS (Semaphore) and email (Resend, or SMTP as a fallback).
- * Each channel runs only when it is set up in backend/.env AND switched on under admin -> Integrations,
+ * Customer messages outside the website: email (Resend, or SMTP as a fallback).
+ * It runs only when it is set up in backend/.env AND switched on under admin -> Integrations,
  * and only for customers who have not turned it off on their Profile page.
  * Nothing here ever throws into a request: failures are logged and skipped.
  */
 const { env, isActive } = require('./index');
-
-/* ---------------- SMS (Semaphore, Philippines) ---------------- */
-
-/** "0917 123 4567", "+63 917-123-4567", "9171234567" -> "09171234567"; anything else -> null. */
-function normalizePhMobile(raw) {
-  let d = String(raw || '').replace(/\D/g, '');
-  if (d.startsWith('63') && d.length === 12) d = '0' + d.slice(2);
-  if (d.startsWith('9') && d.length === 10) d = '0' + d;
-  return /^09\d{9}$/.test(d) ? d : null;
-}
-
-async function sendSms(phone, text) {
-  const number = normalizePhMobile(phone);
-  if (!number) return { ok: false, reason: 'no valid PH mobile number' };
-  const body = new URLSearchParams({ apikey: env('SEMAPHORE_API_KEY'), number, message: String(text).slice(0, 450) });
-  if (env('SEMAPHORE_SENDER_NAME')) body.set('sendername', env('SEMAPHORE_SENDER_NAME'));
-  const r = await fetch(env('SEMAPHORE_API_URL') || 'https://api.semaphore.co/api/v4/messages', { method: 'POST', body, signal: AbortSignal.timeout(15000) });
-  if (!r.ok) {
-    const detail = await r.text().catch(() => '');
-    throw new Error(`Semaphore ${r.status}: ${detail.slice(0, 200)}`);
-  }
-  return { ok: true };
-}
 
 /* ---------------- Email ---------------- */
 
@@ -67,32 +44,23 @@ function icsFor(booking) {
 /* ---------------- one place to message a customer ---------------- */
 
 /**
- * Sends `text` to the customer by SMS and/or email (in-app notifications are handled by U.notify).
+ * Sends `text` to the customer by email (in-app notifications are handled by U.notify).
  * opts: { subject, booking, attachIcs }
  */
 async function deliver(userId, text, { subject = "Update from MAKI's PickleBall Court", booking = null, attachIcs = false } = {}) {
   try {
-    const [smsOn, emailOn] = await Promise.all([isActive('sms'), isActive('email')]);
-    if (!smsOn && !emailOn) return;
+    if (!(await isActive('email'))) return;
     const User = require('../../models/User');
-    const user = await User.findById(userId).select('firstName email phone notifySms notifyEmail isActive');
-    if (!user || user.isActive === false) return;
-
-    if (smsOn && user.notifySms !== false && user.phone) {
-      try { await sendSms(user.phone, `MAKI's Pickleball: ${text}`); } catch (err) { console.error('SMS failed:', err.message); }
-    }
-    if (emailOn && user.notifyEmail !== false && user.email) {
-      try {
-        const sendEmail = require('../sendEmail');
-        await sendEmail({
-          to: user.email, subject, html: emailHtml(user.firstName, text, booking),
-          attachments: attachIcs && booking ? [{ filename: `pickleball-${booking.referenceNumber}.ics`, content: icsFor(booking), contentType: 'text/calendar' }] : undefined,
-        });
-      } catch (err) { console.error('Email failed:', err.message); }
-    }
+    const user = await User.findById(userId).select('firstName email notifyEmail isActive');
+    if (!user || user.isActive === false || user.notifyEmail === false || !user.email) return;
+    const sendEmail = require('../sendEmail');
+    await sendEmail({
+      to: user.email, subject, html: emailHtml(user.firstName, text, booking),
+      attachments: attachIcs && booking ? [{ filename: `pickleball-${booking.referenceNumber}.ics`, content: icsFor(booking), contentType: 'text/calendar' }] : undefined,
+    });
   } catch (err) {
-    console.error('Customer message failed:', err.message);
+    console.error('Customer email failed:', err.message);
   }
 }
 
-module.exports = { deliver, sendSms, normalizePhMobile, icsFor };
+module.exports = { deliver, icsFor };

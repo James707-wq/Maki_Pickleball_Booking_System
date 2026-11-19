@@ -43,11 +43,17 @@
     const search = document.getElementById('searchInput');
     const status = document.getElementById('statusFilter');
     const facility = document.getElementById('facilityFilter');
+    // courts.html?q=court&status=available&facility=Indoor
+    const START = pageParams();
+    search.value = START.get('q') || '';
+    if ([...status.options].some((o) => o.value === START.get('status'))) status.value = START.get('status');
+    facility.value = START.get('facility') || '';
 
     async function loadCourts() {
       const grid = document.getElementById('courtGrid');
       grid.innerHTML = '<div class="skel-grid" aria-label="Loading courts"><span class="skel-card"></span><span class="skel-card"></span><span class="skel-card"></span></div>';
 
+      setPageParams({ q: search.value.trim(), status: status.value, facility: facility.value.trim() });
       const params = new URLSearchParams();
       if (search.value) params.set('q', search.value);
       if (status.value) params.set('status', status.value);

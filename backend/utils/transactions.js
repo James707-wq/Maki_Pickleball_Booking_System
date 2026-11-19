@@ -6,6 +6,7 @@ async function logTransaction(booking, type, { amount, method, note, by } = {}) 
     await Transaction.create({
       booking: booking._id,
       user: booking.user && booking.user._id ? booking.user._id : booking.user,
+      customerName: !booking.user && booking.walkIn && booking.walkIn.name ? booking.walkIn.name : '',
       referenceNumber: booking.referenceNumber,
       courtName: booking.courtName,
       type,

@@ -1,8 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const Court = require('../models/Court');
-const Booking = require('../models/Booking');
-const BlockedSlot = require('../models/BlockedSlot');
 const { protect } = require('../middleware/auth');
 const U = require('../utils/bookingUtils');
 const handleError = require('../utils/handleError');
@@ -70,26 +68,7 @@ router.get('/:id/availability', async (req, res) => {
       return res.json({ success: true, courtStatus: court.status, slots: [] });
     }
 
-    const dayStart = U.manilaMidnight(date);
-    const [bookings, blocks] = await Promise.all([
-      Booking.find({ court: court._id, date: dayStart, status: { $in: U.ACTIVE_STATUSES } }).select('startTime'),
-      BlockedSlot.find({ court: court._id, date: dayStart }).select('startTime'),
-    ]);
-    const booked = new Set(bookings.map((b) => b.startTime));
-    const blocked = new Set(blocks.map((b) => b.startTime));
-    const now = new Date();
-    const step = court.slotDurationMinutes;
-
-    const slots = U.slotStarts(court.openTime, court.closeTime, step).map((start) => {
-      const startTime = U.toHHMM(start);
-      const isPast = new Date(dayStart.getTime() + start * 60000) <= now;
-      return {
-        startTime,
-        endTime: U.toHHMM(start + step),
-        status: booked.has(startTime) ? 'booked' : blocked.has(startTime) ? 'blocked' : isPast ? 'past' : 'available',
-      };
-    });
-
+    const slots = await U.daySlots(court, date);
     res.json({ success: true, courtStatus: court.status, date, slots });
   } catch (err) {
     handleError(res, err);

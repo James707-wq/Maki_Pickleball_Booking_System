@@ -17,7 +17,14 @@ async function apiRequest(path, { method = 'GET', body, auth = false, version } 
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const data = await res.json();
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* not JSON */ }
+  if (res.status === 401 && auth) {
+    // the sign-in has ended (signed out on another device, expired, or ended by the facility): sign in again
+    try { sessionStorage.setItem('signedOutReason', data.message || 'Please sign in again.'); } catch (e) { /* storage off */ }
+    localStorage.removeItem('token');
+    window.location.href = 'index.html';
+  }
   if (!res.ok || data.success === false) {
     const err = new Error(data.message || 'Something went wrong');
     err.status = res.status;
@@ -38,9 +45,28 @@ function requireAuth() {
   }
 }
 
-function logout() {
+// remote: also end the session on the server (AF-144), so the token stops working everywhere, not just here
+function logout({ remote = false } = {}) {
+  const token = localStorage.getItem('token');
+  if (remote && token) {
+    try {
+      fetch(`${API_BASE}/auth/logout`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, keepalive: true }).catch(() => {});
+    } catch (e) { /* signed out here anyway */ }
+  }
   localStorage.removeItem('token');
   window.location.href = 'index.html';
+}
+
+// The page's filters live in its address (e.g. my-bookings.html?status=cancelled&view=calendar), so a reload,
+// the Back button or a shared link opens the same view.
+function pageParams() {
+  return new URLSearchParams(window.location.search);
+}
+function setPageParams(values) {
+  const qs = new URLSearchParams(window.location.search);
+  Object.entries(values).forEach(([k, v]) => { if (v === '' || v == null) qs.delete(k); else qs.set(k, String(v)); });
+  const next = `${window.location.pathname}${qs.toString() ? `?${qs}` : ''}${window.location.hash}`;
+  if (next !== window.location.pathname + window.location.search + window.location.hash) window.history.replaceState(window.history.state, '', next);
 }
 
 // Escape text before putting it into innerHTML (prevents XSS)
@@ -58,9 +84,12 @@ function fmtDate(d) {
 // ---- small UI helpers shared by every page ----
 document.addEventListener('DOMContentLoaded', () => {
   // highlight the current page in the navbar
-  const here = location.pathname.split('/').pop() || 'index.html';
+  // works for clean addresses ("/courts") and file names ("/courts.html") alike
+  const nameOf = (p) => String(p || '').split(/[?#]/)[0].split('/').pop().replace(/\.html$/, '') || 'index';
+  const here = nameOf(location.pathname);
   document.querySelectorAll('.navbar .links a[href]').forEach((a) => {
-    if (a.getAttribute('href') === here) a.setAttribute('aria-current', 'page');
+    const href = a.getAttribute('href');
+    if (href !== '#' && nameOf(href) === here) a.setAttribute('aria-current', 'page');
   });
 
   // show / hide password

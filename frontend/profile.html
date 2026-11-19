@@ -37,7 +37,6 @@
 
         <fieldset id="notifyPrefs" class="notify-prefs" hidden>
           <legend>Booking updates</legend>
-          <label id="smsPref" class="check-row" hidden><input type="checkbox" id="notifySms" /> Text me booking updates and reminders (needs a PH mobile number)</label>
           <label id="emailPref" class="check-row" hidden><input type="checkbox" id="notifyEmail" /> Email me booking updates (with a calendar file)</label>
         </fieldset>
 
@@ -64,6 +63,15 @@
         <div id="passwordMsg" class="msg"></div>
       </form>
     </div>
+
+    <!-- AF-141: the devices signed in to this account -->
+    <div class="card" id="devices" style="margin-top: 20px;">
+      <h1>Where you're signed in</h1>
+      <p class="subtitle">Sign out any device you don't recognise, then change your password.</p>
+      <div id="sessionList"><div class="skeleton" aria-label="Loading"><i></i><i></i></div></div>
+      <button type="button" id="endOthers" class="secondary" hidden>Sign out all other devices</button>
+      <div id="sessionMsg" class="msg" role="status"></div>
+    </div>
   </div>
 
   <script src="js/config.js"></script>
@@ -79,13 +87,11 @@
       document.getElementById('lastName').value = data.user.lastName;
       document.getElementById('email').value = data.user.email;
       document.getElementById('phone').value = data.user.phone || '';
-      document.getElementById('notifySms').checked = data.user.notifySms !== false;
       document.getElementById('notifyEmail').checked = data.user.notifyEmail !== false;
-      // only offer the channels the facility has switched on
+      // only offer email updates when the facility has email switched on
       const { features } = await Integrations.config();
-      document.getElementById('smsPref').hidden = !features.sms;
       document.getElementById('emailPref').hidden = !features.email;
-      document.getElementById('notifyPrefs').hidden = !features.sms && !features.email;
+      document.getElementById('notifyPrefs').hidden = !features.email;
     }
     loadProfile();
 
@@ -101,11 +107,11 @@
             firstName: document.getElementById('firstName').value,
             lastName: document.getElementById('lastName').value,
             phone: document.getElementById('phone').value,
-            ...(document.getElementById('smsPref').hidden ? {} : { notifySms: document.getElementById('notifySms').checked }),
             ...(document.getElementById('emailPref').hidden ? {} : { notifyEmail: document.getElementById('notifyEmail').checked }),
           },
         });
         showMsg(msg, 'Profile updated successfully', 'success');
+        if (window.navRefreshAccount) window.navRefreshAccount(); // the name in the top bar
       } catch (err) {
         showMsg(msg, err.message);
       }
@@ -123,7 +129,7 @@
       }
 
       try {
-        await apiRequest('/users/change-password', {
+        const r = await apiRequest('/users/change-password', {
           method: 'PUT',
           auth: true,
           body: {
@@ -131,12 +137,53 @@
             newPassword,
           },
         });
-        showMsg(msg, 'Password changed successfully', 'success');
+        if (r.token) localStorage.setItem('token', r.token); // this device stays signed in; the others were signed out
+        showMsg(msg, r.message || 'Password changed', 'success');
         document.getElementById('passwordForm').reset();
+        loadSessions();
       } catch (err) {
         showMsg(msg, err.message);
       }
     });
+
+    // AF-141: where this account is signed in
+    const fmtWhen = (d) => new Date(d).toLocaleString('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    async function loadSessions() {
+      const box = document.getElementById('sessionList');
+      try {
+        const { sessions } = await apiRequest('/users/sessions', { auth: true });
+        box.innerHTML = sessions.map((x) => `
+          <div class="session-row">
+            <div><b>${esc(x.device)}</b>${x.current ? ' <span class="pill ok">This device</span>' : ''}
+              <span class="session-meta">${esc(x.ip || 'Unknown address')} · signed in ${esc(fmtWhen(x.signedInAt))} · last active ${esc(fmtWhen(x.lastSeenAt))}</span></div>
+            ${x.current ? '' : `<button type="button" class="secondary" data-end="${esc(x.id)}">Sign out</button>`}
+          </div>`).join('') || '<div class="empty">No devices are signed in.</div>';
+        document.getElementById('endOthers').hidden = !sessions.some((x) => !x.current);
+      } catch (err) {
+        box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+      }
+    }
+    document.getElementById('sessionList').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-end]');
+      if (!b) return;
+      b.disabled = true;
+      try {
+        await apiRequest(`/users/sessions/${b.dataset.end}`, { method: 'DELETE', auth: true });
+        showMsg(document.getElementById('sessionMsg'), 'That device was signed out.', 'success');
+      } catch (err) { showMsg(document.getElementById('sessionMsg'), err.message); }
+      loadSessions();
+    });
+    document.getElementById('endOthers').addEventListener('click', async () => {
+      const b = document.getElementById('endOthers');
+      b.disabled = true;
+      try {
+        const r = await apiRequest('/users/sessions/end-others', { method: 'POST', auth: true });
+        showMsg(document.getElementById('sessionMsg'), `${r.ended} other device${r.ended === 1 ? '' : 's'} signed out.`, 'success');
+      } catch (err) { showMsg(document.getElementById('sessionMsg'), err.message); }
+      b.disabled = false;
+      loadSessions();
+    });
+    loadSessions();
   </script>
 </body>
 </html>

@@ -1,2 +1,4 @@
 node_modules/
 .env
+# backups hold customer data and password hashes: never commit them (admin -> Backup & restore)
+backend/backups/

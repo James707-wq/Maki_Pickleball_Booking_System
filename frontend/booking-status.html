@@ -68,6 +68,7 @@
       const message = document.getElementById('lookupMessage');
       const result = document.getElementById('bookingResult');
       const referenceNumber = document.getElementById('referenceNumber').value.trim().toUpperCase();
+      setPageParams({ reference: referenceNumber }); // booking-status?reference=MKI-...: reload or share to look it up again
       result.hidden = true;
       message.textContent = '';
       message.className = 'msg';

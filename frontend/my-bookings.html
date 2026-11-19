@@ -47,6 +47,13 @@
     .booking-tools select { grid-column: 1 / -1; }
     .booking-tools input, .booking-tools select { min-width: 0; margin: 0; }
     .booking-tools .reschedule-btn, .booking-tools .cancel-btn { width: 100%; }
+    .booking-tools button:disabled { opacity: .55; cursor: not-allowed; }
+    .policy-hint { grid-column: 1 / -1; font-size: .8rem; color: var(--muted); line-height: 1.35; }
+    .cancel-outcome { margin: 12px 0 4px; padding: 10px 12px; border-radius: 8px; background: #eef5fd; font-size: .9rem; line-height: 1.45; }
+    .cancel-outcome.none { background: #fff6e0; color: #8a5a00; }
+    .cancel-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+    .cancel-actions button { width: auto; margin: 0; padding: 10px 18px; }
+    .policy-list { margin: 6px 0 0; padding-left: 20px; line-height: 1.5; }
     .booking-actions .checkin-note { justify-self: end; }
     @media (max-width: 700px) {
       .booking-entry { grid-template-columns: 54px minmax(0, 1fr); gap: 12px; }
@@ -81,6 +88,7 @@
         <button type="button" data-view="calendar" aria-pressed="false">Calendar</button>
       </div>
       <p class="booking-lookup-link"><a href="booking-status.html">Look up a booking by reference number</a></p>
+      <div id="pageMsg" class="msg" role="status" aria-live="polite"></div>
     </div>
 
     <!-- Calendar view: your bookings on a month grid -->
@@ -103,6 +111,29 @@
     <div class="card list-card" style="margin-top:18px;">
       <h2>Booking history</h2>
       <div id="historyList"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+    </div>
+  </div>
+
+  <!-- AF-137: the facility's cancellation policy (admin -> Hours & rules) -->
+  <div class="container" style="max-width: 960px; padding-top: 0;">
+    <section class="card" id="policyCard" hidden>
+      <h2 style="margin-top:0;">Cancellation and refunds</h2>
+      <div id="policyBody"></div>
+      <p class="subtitle" style="margin:8px 0 0;"><a href="terms.html">All terms and policies</a></p>
+    </section>
+  </div>
+
+  <div id="cancelModal" class="status-modal-backdrop" aria-hidden="true">
+    <div class="status-modal" role="dialog" aria-modal="true" aria-labelledby="cancelTitle">
+      <h2 id="cancelTitle" style="margin:0;">Cancel this booking?</h2>
+      <div id="cancelBody"></div>
+      <label for="cancelReason">Reason (optional)</label>
+      <input id="cancelReason" maxlength="200" placeholder="e.g. Change of plans" />
+      <div id="cancelMsg" class="msg"></div>
+      <div class="cancel-actions">
+        <button type="button" class="secondary" id="keepBooking">Keep booking</button>
+        <button type="button" class="danger" id="confirmCancel">Cancel booking</button>
+      </div>
     </div>
   </div>
 
@@ -133,6 +164,38 @@
 
     let COURTS = [];
     let BOOKINGS = [];
+    let POLICY = null; // the facility's rules (GET /api/bookings answers with them)
+
+    const peso = (n) => '₱' + Number(n || 0).toLocaleString('en-PH');
+    const minutesOf = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+    const startOf = (b) => new Date(new Date(b.date).getTime() + minutesOf(b.startTime) * 60000);
+    const fmtWhen = (d) => d.toLocaleString('en-PH', { timeZone: 'Asia/Manila', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+    /** Until when this booking can still be cancelled or moved under the policy, and one line saying so. */
+    function policyState(b) {
+      const r = POLICY || {};
+      const start = startOf(b).getTime();
+      const now = Date.now();
+      const cancelBy = start - (r.cancelCutoffHours || 0) * 3600e3;
+      const moveBy = start - (r.rescheduleCutoffHours || 0) * 3600e3;
+      const fullBy = r.fullRefundHours && r.lateRefundPercent < 100 ? start - r.fullRefundHours * 3600e3 : null;
+      const paid = b.paymentStatus === 'paid' && b.totalFee > 0;
+      let hint = '';
+      if (now >= cancelBy && now >= moveBy) hint = 'Cancelling and moving this booking have closed. Please contact the facility.';
+      else if (now >= cancelBy) hint = `Cancelling has closed for this booking. You can still move it until ${fmtWhen(new Date(moveBy))}.`;
+      else if (paid && fullBy && now < fullBy && fullBy < cancelBy) hint = `Full refund if cancelled before ${fmtWhen(new Date(fullBy))}.`;
+      else if (paid && fullBy && now >= fullBy && fullBy < cancelBy) hint = r.lateRefundPercent ? `Cancelling now refunds ${r.lateRefundPercent}% of your payment.` : 'Cancelling now is not refunded.';
+      else if (r.cancelCutoffHours) hint = `Can be cancelled until ${fmtWhen(new Date(cancelBy))}.`;
+      if (now >= moveBy && now < cancelBy) hint = `${hint} Moving it has closed.`.trim(); // the cancel lines above already cover the rest
+      return { canCancel: now < cancelBy, canMove: now < moveBy, hint };
+    }
+
+    function renderPolicy() {
+      const lines = POLICY && POLICY.lines && POLICY.lines.cancellation;
+      if (!lines) return;
+      document.getElementById('policyBody').innerHTML = `<ul class="policy-list">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`;
+      document.getElementById('policyCard').hidden = false;
+    }
 
     function manilaDateInputValue(date) {
       const parts = new Intl.DateTimeFormat('en-CA', {
@@ -221,6 +284,7 @@
 
       el.innerHTML = bookings.map((booking) => {
           const statusClass = ['cancelled', 'rejected'].includes(booking.status) ? 'bad' : booking.status === 'pending' ? '' : 'ok';
+        const ps = ['pending', 'confirmed'].includes(booking.status) ? policyState(booking) : { canCancel: false, canMove: false, hint: '' };
         const courtOptions = COURTS.map((court) => `
           <option value="${esc(court._id)}" ${String(booking.court?._id || booking.court || '') === String(court._id) ? 'selected' : ''}>${esc(court.name)}</option>
         `).join('');
@@ -250,8 +314,9 @@
                   <select class="new-court" aria-label="Court">${courtOptions}</select>
                   <input type="date" class="new-date" aria-label="New date" value="${manilaDateInputValue(booking.date)}" />
                                        <select class="new-time" aria-label="New time"><option>Loading times...</option></select>
-                  <button type="button" class="secondary reschedule-btn">Reschedule</button>
-                  <button type="button" class="danger cancel-btn">Cancel</button>
+                  <button type="button" class="secondary reschedule-btn" ${ps.canMove ? '' : 'disabled title="Moving this booking has closed under the cancellation policy"'}>Reschedule</button>
+                  <button type="button" class="danger cancel-btn" ${ps.canCancel ? '' : 'disabled title="Cancelling this booking has closed under the cancellation policy"'}>Cancel</button>
+                  ${ps.hint ? `<span class="policy-hint">${esc(ps.hint)}</span>` : ''}
                 </div>
               ` : ''}
             </div>
@@ -263,10 +328,13 @@
     async function loadBookings() {
       try {
         await loadCourts();
-        const [{ bookings: upcoming }, { bookings: history }] = await Promise.all([
+        const [upcomingRes, { bookings: history }] = await Promise.all([
           apiRequest('/bookings?scope=upcoming', { auth: true }),
           apiRequest('/bookings?scope=history', { auth: true }),
         ]);
+        const upcoming = upcomingRes.bookings;
+        POLICY = upcomingRes.policy || null;
+        renderPolicy();
         BOOKINGS = [...upcoming, ...history];
         renderFilteredBookings();
 
@@ -297,22 +365,9 @@
         });
 
         document.querySelectorAll('.cancel-btn').forEach((button) => {
-          button.addEventListener('click', async () => {
-            const id = button.closest('.reschedule-form').dataset.bookingId;
-            const version = button.closest('.reschedule-form').dataset.version;
-            const reason = window.prompt('Reason for cancellation (optional):', 'Customer cancelled this booking');
-            try {
-              await apiRequest(`/bookings/${id}/cancel`, {
-                method: 'PATCH',
-                auth: true,
-                version,
-                body: { reason: reason || 'Customer cancelled this booking' },
-              });
-              loadBookings();
-            } catch (err) {
-              alert(err.message);
-              if (err.code === 'WRITE_CONFLICT') loadBookings();
-            }
+          button.addEventListener('click', () => {
+            const form = button.closest('.reschedule-form');
+            openCancel(form.dataset.bookingId, form.dataset.version, button);
           });
         });
 
@@ -347,6 +402,68 @@
       }
     }
 
+    /* ---------- AF-137 cancel dialog ---------- */
+    const cancelModal = document.getElementById('cancelModal');
+    let cancelTarget = null; // { id, version }
+    function closeCancel() {
+      cancelModal.classList.remove('open');
+      cancelModal.setAttribute('aria-hidden', 'true');
+      cancelTarget = null;
+    }
+    function outcomeText(c) {
+      if (!c.paid) return { text: 'Nothing to refund: this booking has not been paid.', none: false };
+      if (c.refund >= c.totalFee) return { text: `You paid ${peso(c.totalFee)}. You get all of it back: the facility will send your refund.`, none: false };
+      if (c.refund > 0) return { text: `You paid ${peso(c.totalFee)}. Under the cancellation policy you get ${peso(c.refund)} back (${c.rule.toLowerCase()}).`, none: false };
+      return { text: `You paid ${peso(c.totalFee)}. Under the cancellation policy, cancelling now is not refunded (${c.rule.toLowerCase()}).`, none: true };
+    }
+    async function openCancel(id, version, button) {
+      const b = BOOKINGS.find((x) => String(x._id) === String(id));
+      if (button) button.disabled = true;
+      let check;
+      try {
+        check = await apiRequest(`/bookings/${id}/cancel-check`, { auth: true });
+      } catch (err) {
+        if (button) button.disabled = false;
+        return alert(err.message);
+      }
+      if (button) button.disabled = false;
+      if (!check.canCancel) { alert(check.message); return loadBookings(); }
+      const o = outcomeText(check);
+      document.getElementById('cancelBody').innerHTML = `
+        <p style="margin:12px 0 0;"><b>${esc((b && (b.courtName || (b.court && b.court.name))) || 'Court')}</b>,
+          ${b ? `${esc(fmtDate(b.date))} ${esc(b.startTime)}–${esc(b.endTime)}` : ''}<br><span class="subtitle">Ref: ${esc(b ? b.referenceNumber : '')}</span></p>
+        <div class="cancel-outcome${o.none ? ' none' : ''}">${esc(o.text)}</div>`;
+      document.getElementById('cancelReason').value = '';
+      document.getElementById('cancelMsg').className = 'msg';
+      cancelTarget = { id, version };
+      cancelModal.classList.add('open');
+      cancelModal.setAttribute('aria-hidden', 'false');
+      setTimeout(() => document.getElementById('cancelReason').focus(), 30);
+    }
+    document.getElementById('keepBooking').addEventListener('click', closeCancel);
+    cancelModal.addEventListener('click', (e) => { if (e.target === cancelModal) closeCancel(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cancelModal.classList.contains('open')) closeCancel(); });
+    document.getElementById('confirmCancel').addEventListener('click', async () => {
+      if (!cancelTarget) return;
+      const btn = document.getElementById('confirmCancel');
+      btn.disabled = true;
+      try {
+        const r = await apiRequest(`/bookings/${cancelTarget.id}/cancel`, {
+          method: 'PATCH', auth: true, version: cancelTarget.version,
+          body: { reason: document.getElementById('cancelReason').value.trim() || 'Customer cancelled this booking' },
+        });
+        closeCancel();
+        const paidNote = r.rule ? (r.refund > 0 ? ` The facility will refund ${peso(r.refund)}.` : ' Under the cancellation policy, it is not refunded.') : '';
+        showMsg(document.getElementById('pageMsg'), `Booking ${r.booking.referenceNumber} was cancelled.${paidNote}`, 'success');
+        loadBookings();
+      } catch (err) {
+        showMsg(document.getElementById('cancelMsg'), err.message);
+        if (err.code === 'WRITE_CONFLICT') { closeCancel(); loadBookings(); }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
     function bookingEndInstant(booking) {
       const [hours, minutes] = booking.endTime.split(':').map(Number);
       return new Date(booking.date).getTime() + (hours * 60 + minutes) * 60_000;
@@ -375,7 +492,10 @@
     /* ---------- Calendar view ---------- */
     let VIEW = 'list';
     try { VIEW = localStorage.getItem('myBookingsView') === 'calendar' ? 'calendar' : 'list'; } catch (e) { /* storage unavailable */ }
-    let calMonth = todayManila().slice(0, 7); // "YYYY-MM"
+    const START = pageParams(); // my-bookings.html?status=cancelled&view=calendar&month=2026-12
+    if (['list', 'calendar'].includes(START.get('view'))) VIEW = START.get('view');
+    let calMonth = /^\d{4}-\d{2}$/.test(START.get('month') || '') ? START.get('month') : todayManila().slice(0, 7); // "YYYY-MM"
+    const keepMonth = () => setPageParams({ month: calMonth === todayManila().slice(0, 7) ? '' : calMonth });
 
     function setView(v) {
       VIEW = v;
@@ -383,6 +503,7 @@
       document.querySelectorAll('.view-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
       document.getElementById('calendarCard').hidden = v !== 'calendar';
       document.querySelectorAll('.list-card').forEach((c) => { c.hidden = v === 'calendar'; });
+      setPageParams({ view: v === 'calendar' ? 'calendar' : '' });
       if (v === 'calendar') renderCalendar();
     }
     document.querySelector('.view-switch').addEventListener('click', (e) => {
@@ -393,11 +514,12 @@
       const [y, m] = calMonth.split('-').map(Number);
       const d = new Date(Date.UTC(y, m - 1 + n, 1));
       calMonth = d.toISOString().slice(0, 7);
+      keepMonth();
       renderCalendar();
     };
     document.getElementById('calPrev').onclick = () => shiftMonth(-1);
     document.getElementById('calNext').onclick = () => shiftMonth(1);
-    document.getElementById('calToday').onclick = () => { calMonth = todayManila().slice(0, 7); renderCalendar(); };
+    document.getElementById('calToday').onclick = () => { calMonth = todayManila().slice(0, 7); keepMonth(); renderCalendar(); };
 
     function renderCalendar() {
       if (VIEW !== 'calendar') return;
@@ -435,9 +557,14 @@
         } catch (err) { alert(err.message); }
       };
     }
+    const statusFilter = document.getElementById('statusFilter');
+    if ([...statusFilter.options].some((o) => o.value === START.get('status'))) statusFilter.value = START.get('status');
     setView(VIEW);
 
-    document.getElementById('statusFilter').addEventListener('change', loadBookings);
+    statusFilter.addEventListener('change', () => {
+      setPageParams({ status: statusFilter.value === 'all' ? '' : statusFilter.value });
+      loadBookings();
+    });
     loadBookings();
   </script>
 </body>

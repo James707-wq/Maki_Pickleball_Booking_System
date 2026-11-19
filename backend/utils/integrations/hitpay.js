@@ -144,6 +144,7 @@ async function settleBooking(booking, { by } = {}) {
     { new: true }
   );
   if (!updated) return { paid: true, alreadyPaid: true, booking: await Booking.findById(booking._id) };
+  require('./webhook').queueChange(updated, 'booking.paid', { paymentStatus: [booking.paymentStatus, 'paid'] });
   await logTransaction(updated, 'payment', { amount, method, note: `HitPay payment request ${booking.hitpay.requestId}`, by });
   await U.notify(updated.user, `Payment for booking ${updated.referenceNumber} was received via HitPay. Thank you!`,
     { subject: `Payment received for ${updated.referenceNumber}`, booking: updated });

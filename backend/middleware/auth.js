@@ -1,10 +1,12 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { can } = require('../config/permissions');
+const sessions = require('../utils/sessions');
 
 /**
  * Protects routes that require a logged-in user. Expects: Authorization: Bearer <token>
- * Rejects deactivated accounts and tokens issued before the last password change.
+ * Rejects deactivated accounts, tokens issued before the last password change, and tokens whose
+ * session was ended or expired (AF-141, utils/sessions.js). Sets req.user and req.sessionId.
  */
 const protect = async (req, res, next) => {
   let token;
@@ -28,6 +30,9 @@ const protect = async (req, res, next) => {
     if (req.user.passwordChangedAt && decoded.iat < Math.floor(req.user.passwordChangedAt.getTime() / 1000)) {
       return res.status(401).json({ success: false, message: 'Not authorized, password was changed' });
     }
+    const session = await sessions.check(decoded, req);
+    if (!session.ok) return res.status(401).json({ success: false, code: 'SESSION_ENDED', message: session.message });
+    req.sessionId = String(decoded.sid);
     next();
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Not authorized, token failed' });

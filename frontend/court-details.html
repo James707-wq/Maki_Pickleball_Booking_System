@@ -34,6 +34,13 @@
       <div id="selectionSummary" class="selection-summary"></div>
       <div id="bookCaptcha" class="captcha"></div>
     </div>
+
+    <!-- AF-136 / AF-137: the facility's booking rules and cancellation policy (admin -> Hours & rules) -->
+    <section class="card policy-card" id="policyCard" hidden style="margin-top:20px;">
+      <h2 style="margin-top:0;">Before you book</h2>
+      <div id="policyBody"></div>
+      <p class="subtitle" style="margin:6px 0 0;"><a href="terms.html">All terms and policies</a></p>
+    </section>
   </div>
 
   <script src="js/config.js"></script>
@@ -54,6 +61,19 @@
     const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); // today in Manila
     dateInput.value = today;
     dateInput.min = today;
+    // court-details.html?id=...&date=2026-11-20: a link to one court on one day
+    const startDate = pageParams().get('date');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(startDate || '') && startDate >= today) dateInput.value = startDate;
+
+    // the facility's rules: how far ahead the calendar goes, and the policy shown before booking
+    let RULES = null;
+    Integrations.mountPolicy(document.getElementById('policyBody'), ['booking', 'cancellation']).then((rules) => {
+      if (!rules) return;
+      RULES = rules;
+      document.getElementById('policyCard').hidden = false;
+      if (rules.lastBookableDate) dateInput.max = rules.lastBookableDate;
+      if (selectedSlot) renderSummary();
+    });
 
     async function loadCourtInfo() {
       const el = document.getElementById('courtInfo');
@@ -162,6 +182,7 @@
         </div>
         <div id="promoMsg" class="msg ${note ? noteType : ''}" ${note ? '' : 'style="display:none"'}>${esc(note)}</div>
         <button type="button" id="confirmBookingBtn" class="cta" style="margin-top:14px;">Confirm Booking</button>
+        ${RULES ? `<p class="policy-note">${esc(RULES.lines.cancellation.slice(0, 2).join(' '))} <a href="#policyCard">Policy</a></p>` : ''}
         <div id="bookingMsg" class="msg"></div>
       `;
       document.getElementById('confirmBookingBtn').addEventListener('click', confirmBooking);
@@ -209,7 +230,10 @@
       }
     }
 
-    dateInput.addEventListener('change', loadAvailability);
+    dateInput.addEventListener('change', () => {
+      setPageParams({ date: dateInput.value === today ? '' : dateInput.value });
+      loadAvailability();
+    });
 
     loadCourtInfo();
     loadAvailability();

@@ -11,6 +11,7 @@ const NotificationSchema = new mongoose.Schema(
     read: { type: Boolean, default: false },
     sentBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // AF-125: set when an admin sent it by hand
     batch: { type: String, index: true },                          // groups one broadcast into one log row
+    link: { type: String, trim: true, maxlength: 200 },            // SF-127: where a staff alert leads in the console (#/...)
   },
   { timestamps: true }
 );

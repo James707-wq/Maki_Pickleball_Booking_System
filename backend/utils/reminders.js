@@ -37,7 +37,7 @@ async function sendDueReminders(now = new Date()) {
     const soon = minutesLeft >= 105 ? 'in about 2 hours' : `in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}`;
     const when = `${U.toDateStr(booking.date)} at ${booking.startTime}`;
     const message = `Reminder: your booking ${booking.referenceNumber} at ${booking.courtName} starts ${when} (${soon}).`;
-    // in-app, plus SMS / email when switched on (see utils/integrations/messaging.js)
+    // in-app, plus email when switched on (see utils/integrations/messaging.js)
     await U.notify(booking.user, message, { subject: `Reminder: ${booking.courtName} today at ${booking.startTime}`, booking });
     sent += 1;
   }

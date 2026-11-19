@@ -1,6 +1,5 @@
 const express = require('express');
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
 const handleError = require('../utils/handleError');
@@ -8,12 +7,14 @@ const auditSecurityEvent = require('../utils/securityAudit');
 const { verifyTurnstile } = require('../utils/integrations/turnstile');
 const { verifyGoogleIdToken } = require('../utils/integrations/google');
 const L = require('../utils/loginSecurity');
+const sessions = require('../utils/sessions');
+const { protect } = require('../middleware/auth');
 
 // txRouter: write routes run as timestamped transactions (abort + restart on conflict)
 const router = require('../utils/concurrency').txRouter(express.Router());
 
-const signToken = (id, scope) =>
-  jwt.sign(scope ? { id, scope } : { id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+// Every sign-in is a session (AF-141): the token carries its id, and signing out or an admin ending it
+// stops the token at once (utils/sessions.js).
 
 const userPayload = (u) => ({ id: u._id, firstName: u.firstName, lastName: u.lastName, email: u.email, role: u.role });
 
@@ -31,7 +32,7 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, message: 'An account with this email already exists' });
     }
     const user = await User.create({ firstName, lastName, email, phone, password });
-    res.status(201).json({ success: true, token: signToken(user._id), user: userPayload(user) });
+    res.status(201).json({ success: true, token: await sessions.start(req, user, { method: 'signup' }), user: userPayload(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -52,7 +53,7 @@ router.post('/login', async (req, res) => {
     await L.registerSuccess(user, req);
     L.recordAttempt(req, { portal: 'customer', success: true, reason: 'ok', user });
     auditSecurityEvent(req, { action: 'Customer signed in', user });
-    res.json({ success: true, token: signToken(user._id), user: userPayload(user) });
+    res.json({ success: true, token: await sessions.start(req, user), user: userPayload(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -77,8 +78,8 @@ router.post('/admin-login', async (req, res) => {
     }
     await L.registerSuccess(user, req);
     L.recordAttempt(req, { portal: 'admin', success: true, reason: 'ok', user });
-    auditSecurityEvent(req, { action: 'Admin signed in', user });
-    res.json({ success: true, token: signToken(user._id, 'admin'), user: userPayload(user) });
+    auditSecurityEvent(req, { action: `${user.role === 'staff' ? 'Staff' : 'Admin'} signed in`, user }); // SF-135: in the activity log
+    res.json({ success: true, token: await sessions.start(req, user, { portal: 'admin' }), user: userPayload(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -93,7 +94,7 @@ router.post('/admin-google', async (req, res) => {
   try {
     let google;
     try {
-      google = await verifyGoogleIdToken(req.body.credential);
+      google = await verifyGoogleIdToken(req.body.credential, 'staff'); // GOOGLE_CLIENT_ID
     } catch (err) {
       auditSecurityEvent(req, { action: 'Failed admin Google sign-in', detail: err.message, statusCode: err.status || 401 });
       return res.status(err.status || 401).json({ success: false, message: err.message });
@@ -107,8 +108,8 @@ router.post('/admin-google', async (req, res) => {
       auditSecurityEvent(req, { action: 'Denied admin Google sign-in', user, detail: 'Account deactivated', statusCode: 401 });
       return res.status(401).json({ success: false, message: 'This account has been deactivated. Please contact the facility.' });
     }
-    auditSecurityEvent(req, { action: 'Admin signed in with Google', user });
-    res.json({ success: true, token: signToken(user._id, 'admin'), user: userPayload(user) });
+    auditSecurityEvent(req, { action: `${user.role === 'staff' ? 'Staff' : 'Admin'} signed in with Google`, user });
+    res.json({ success: true, token: await sessions.start(req, user, { portal: 'admin', method: 'google' }), user: userPayload(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -123,7 +124,7 @@ router.post('/google', async (req, res) => {
   try {
     let google;
     try {
-      google = await verifyGoogleIdToken(req.body.credential);
+      google = await verifyGoogleIdToken(req.body.credential, 'customer'); // CUSTOM_GOOGLE_CLIENT_ID, or GOOGLE_CLIENT_ID
     } catch (err) {
       auditSecurityEvent(req, { action: 'Failed Google sign-in', detail: err.message, statusCode: err.status || 401 });
       return res.status(err.status || 401).json({ success: false, message: err.message });
@@ -143,7 +144,22 @@ router.post('/google', async (req, res) => {
       return res.status(401).json({ success: false, message: 'This account has been deactivated. Please contact the facility.' });
     }
     auditSecurityEvent(req, { action: created ? 'Customer signed up with Google' : 'Customer signed in with Google', user });
-    res.status(created ? 201 : 200).json({ success: true, created, token: signToken(user._id), user: userPayload(user) });
+    res.status(created ? 201 : 200).json({ success: true, created, token: await sessions.start(req, user, { method: 'google' }), user: userPayload(user) });
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+/**
+ * AF-144 Logout - POST /api/auth/logout: ends this session on the server, so its token stops working at once
+ * (not just removed from the browser). Customers and staff alike.
+ */
+router.post('/logout', protect, async (req, res) => {
+  try {
+    await sessions.endOne(req.sessionId, { reason: 'Signed out' });
+    // SF-135 / SF-137: signing out is part of the activity log too
+    auditSecurityEvent(req, { action: `${req.user.role === 'user' ? 'Customer' : req.user.role === 'staff' ? 'Staff' : 'Admin'} signed out`, user: req.user });
+    res.json({ success: true, message: 'Signed out' });
   } catch (err) {
     handleError(res, err);
   }
@@ -212,7 +228,8 @@ router.put('/reset-password/:resettoken', async (req, res) => {
     await L.unlock(user._id); // proving email ownership unlocks a locked account
 
     auditSecurityEvent(req, { action: 'Password reset completed', user });
-    res.json({ success: true, message: 'Password reset successful', token: signToken(user._id) });
+    // the new password ended every older session (models/User.js); this device gets a new one
+    res.json({ success: true, message: 'Password reset successful', token: await sessions.start(req, user, { method: 'reset' }) });
   } catch (err) {
     handleError(res, err);
   }

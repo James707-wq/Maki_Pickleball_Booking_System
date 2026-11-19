@@ -10,6 +10,7 @@ const { publicConfig, isActive } = require('../utils/integrations');
 const Settings = require('../models/Settings');
 const { getForecast, forecastLocation } = require('../utils/integrations/weather');
 const hitpay = require('../utils/integrations/hitpay');
+const { publicView } = require('../utils/policy');
 
 const router = express.Router();
 
@@ -17,11 +18,16 @@ router.get('/integrations/config', async (req, res) => {
   try {
     res.json({ success: true, ...(await publicConfig()) });
   } catch (err) {
-    res.json({ success: true, googleClientId: '', turnstileSiteKey: '' });
+    res.json({ success: true, googleClientId: '', customerGoogleClientId: '', turnstileSiteKey: '' });
   }
 });
 
-/** Facility location for the customer map (only when the map is switched on). */
+/**
+ * Where the facility is, for the customer "Find us" maps and the Location page.
+ * map: show a map (switched on AND pinned). location: the pin, or null until an admin pins it.
+ * address and hours are sent even without a pin.
+ * rules: the booking rules, cancellation policy and payment settings (utils/policy.js), with readable lines.
+ */
 router.get('/facility', async (req, res) => {
   try {
     const s = await Settings.get();
@@ -30,6 +36,9 @@ router.get('/facility', async (req, res) => {
       success: true,
       map: (await isActive('maps')) && pinned,
       location: pinned ? { lat: s.facilityLat, lng: s.facilityLng, address: s.facilityAddress } : null,
+      address: s.facilityAddress || '',
+      hours: { open: s.openTime, close: s.closeTime },
+      rules: publicView(s),
     });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Could not load the facility location' });

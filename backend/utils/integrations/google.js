@@ -3,16 +3,23 @@
  * Google Calendar (mirror confirmed bookings onto the facility calendar via a service account).
  */
 const { OAuth2Client, JWT } = require('google-auth-library');
-const { env, isActive } = require('./index');
+const { env, isActive, googleClientIds } = require('./index');
 
 /* ---------- Sign-In ---------- */
 let oauthClient = null;
-async function verifyGoogleIdToken(credential) {
+/**
+ * Checks a Google ID token from a sign-in button. `who` is the page it came from, because each page has its
+ * own client ID: 'staff' (admin sign-in: GOOGLE_CLIENT_ID) or 'customer' (customer login and sign-up:
+ * CUSTOM_GOOGLE_CLIENT_ID, or GOOGLE_CLIENT_ID when it isn't set). A token made for one is refused by the other.
+ */
+async function verifyGoogleIdToken(credential, who) {
   if (!(await isActive('googleSignIn'))) throw Object.assign(new Error('Google sign-in is turned off'), { status: 400 });
-  oauthClient = oauthClient || new OAuth2Client(env('GOOGLE_CLIENT_ID'));
+  const audience = googleClientIds()[who === 'customer' ? 'customer' : 'staff'];
+  if (!audience) throw Object.assign(new Error('Google sign-in is not set up for this page'), { status: 400 });
+  oauthClient = oauthClient || new OAuth2Client();
   let payload;
   try {
-    const ticket = await oauthClient.verifyIdToken({ idToken: String(credential || ''), audience: env('GOOGLE_CLIENT_ID') });
+    const ticket = await oauthClient.verifyIdToken({ idToken: String(credential || ''), audience });
     payload = ticket.getPayload() || {};
   } catch (err) {
     throw Object.assign(new Error('Google sign-in could not be verified. Please try again.'), { status: 401 });
@@ -69,10 +76,10 @@ async function syncBookingToCalendar(bookingOrId) {
     }
 
     const day = U.toDateStr(b.date);
-    const who = b.user ? `${b.user.firstName} ${b.user.lastName}` : 'Customer';
+    const who = U.customerName(b) === 'Deleted user' ? 'Customer' : U.customerName(b);
     const event = {
       summary: `${b.courtName} · ${who}`,
-      description: [`Booking ${b.referenceNumber}`, b.user && b.user.email, b.user && b.user.phone,
+      description: [`Booking ${b.referenceNumber}`, b.user && b.user.email, (b.user && b.user.phone) || (b.walkIn && b.walkIn.phone),
         `Payment: ${b.paymentStatus}`, `Fee: PHP ${b.totalFee}`].filter(Boolean).join('\n'),
       start: { dateTime: `${day}T${b.startTime}:00+08:00`, timeZone: 'Asia/Manila' },
       end: { dateTime: `${day}T${b.endTime}:00+08:00`, timeZone: 'Asia/Manila' },

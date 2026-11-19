@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notifications - MAKI's PickleBall Court</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" type="image/png" href="img/favicon-32.png" />
+  <link rel="apple-touch-icon" href="img/favicon.png" />
+  <meta name="theme-color" content="#0a325e" />
+  <style>
+    .nt-head h1 { margin: 0 0 6px; }
+    .nt-tools { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 16px 0 4px; }
+    .nt-tools .view-switch { margin-top: 0; }
+    .nt-tools .view-switch span { font-weight: 500; opacity: .85; }
+    button.nt-readall, button.nt-more { width: auto; margin: 0; padding: 8px 14px; font-size: .88rem; }
+    button.nt-more { display: block; margin: 16px auto 0; }
+    .nt-day { margin: 20px 0 2px; font-size: .76rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+    .nt-item { display: flex; gap: 12px; padding: 14px 6px; border-bottom: 1px solid rgba(10,50,94,.1); border-radius: 8px; transition: background-color .15s; }
+    .nt-item:last-child { border-bottom: 0; }
+    .nt-item.unread { cursor: pointer; }
+    .nt-item.unread:hover, .nt-item.unread:focus-visible { background: var(--tint); outline: none; }
+    .nt-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; margin-top: 7px; background: var(--cyan); box-shadow: 0 0 0 3px rgba(51,217,255,.25); }
+    .nt-item.read .nt-dot { background: #c3cedd; box-shadow: none; }
+    .nt-body { min-width: 0; flex: 1; }
+    .nt-msg { line-height: 1.5; overflow-wrap: anywhere; }
+    .nt-item.unread .nt-msg { font-weight: 600; color: var(--text); }
+    .nt-item.read .nt-msg { color: #42536b; }
+    .nt-meta { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; margin-top: 4px; font-size: .8rem; color: var(--muted); }
+    .nt-meta a { font-weight: 600; }
+    .nt-new { padding: 1px 8px; border-radius: 999px; background: #fff7c2; color: #6b5a00; font-weight: 700; font-size: .72rem; }
+  </style>
+</head>
+<body class="app">
+  <div class="navbar" data-nav="app"></div>
+
+  <div class="container" style="max-width: 760px;">
+    <div class="card">
+      <div class="nt-head">
+        <h1>Notifications</h1>
+        <p class="subtitle" style="margin-bottom:0;">Updates about your bookings, payments and the facility.</p>
+      </div>
+      <div class="nt-tools">
+        <div class="view-switch" role="group" aria-label="Show">
+          <button type="button" data-view="all" data-filter="" aria-pressed="true">All</button>
+          <button type="button" data-view="unread" data-filter="unread" aria-pressed="false">Unread <span id="ntUnread"></span></button>
+        </div>
+        <button type="button" class="secondary nt-readall" id="ntReadAll" hidden>Mark all as read</button>
+      </div>
+      <div id="ntList" aria-live="polite"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
+      <button type="button" class="secondary nt-more" id="ntMore" hidden>Show older notifications</button>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/api.js"></script>
+  <script>
+    requireAuth();
+
+    // ?filter=unread is kept in the address, like the other pages' filters
+    const state = { filter: pageParams().get('filter') === 'unread' ? 'unread' : '', items: [], more: false, unread: 0 };
+    const PAGE_SIZE = 20;
+    const REF = /\bMKI-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/; // a booking reference in the message, e.g. MKI-MX3K2P-7F1A
+    const page = (name) => (window.PAGE ? window.PAGE(name) : `${name}.html`);
+    const manilaDay = (d) => new Date(new Date(d).getTime() + 8 * 3600e3).toISOString().slice(0, 10);
+    const dayTitle = (key) => {
+      if (key === manilaDay(new Date())) return 'Today';
+      if (key === manilaDay(new Date(Date.now() - 864e5))) return 'Yesterday';
+      return new Date(`${key}T00:00:00+08:00`).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    };
+    const clock = (d) => new Date(d).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' });
+    const ago = (d) => {
+      const min = Math.round((Date.now() - new Date(d).getTime()) / 60000);
+      if (min < 1) return 'just now';
+      if (min < 60) return `${min} min ago`;
+      const h = Math.round(min / 60);
+      return h < 24 ? `${h} hour${h === 1 ? '' : 's'} ago` : '';
+    };
+
+    function render() {
+      const list = document.getElementById('ntList');
+      document.querySelectorAll('[data-filter]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter)));
+      document.getElementById('ntUnread').textContent = state.unread ? `(${state.unread})` : '';
+      document.getElementById('ntReadAll').hidden = state.unread === 0;
+      document.getElementById('ntMore').hidden = !state.more;
+      if (!state.items.length) {
+        list.innerHTML = `<div class="empty-state">${state.filter === 'unread'
+          ? "You're all caught up: no unread notifications."
+          : 'No notifications yet. You will be told here when a booking is confirmed, a payment is verified, and more.'}</div>`;
+        return;
+      }
+      let lastDay = '';
+      list.innerHTML = state.items.map((n) => {
+        const key = manilaDay(n.createdAt);
+        const head = key !== lastDay ? `<h2 class="nt-day">${esc(dayTitle(key))}</h2>` : '';
+        lastDay = key;
+        const ref = (String(n.message).match(REF) || [])[0];
+        const when = `${clock(n.createdAt)}${ago(n.createdAt) ? ` · ${ago(n.createdAt)}` : ''}`;
+        return `${head}<div class="nt-item ${n.read ? 'read' : 'unread'}" data-id="${esc(n._id)}"${n.read ? '' : ' role="button" tabindex="0" title="Mark as read"'}>
+          <i class="nt-dot" aria-hidden="true"></i>
+          <div class="nt-body"><div class="nt-msg">${esc(n.message)}</div>
+            <div class="nt-meta"><time datetime="${esc(n.createdAt)}">${esc(when)}</time>
+              ${ref ? `<a href="${page('booking-status')}?reference=${encodeURIComponent(ref)}">View booking</a>` : ''}
+              ${n.read ? '' : '<span class="nt-new">New</span>'}</div></div></div>`;
+      }).join('');
+    }
+
+    async function load(append = false) {
+      const qs = new URLSearchParams({ limit: PAGE_SIZE });
+      if (state.filter) qs.set('filter', state.filter);
+      if (append && state.items.length) qs.set('before', state.items[state.items.length - 1]._id);
+      try {
+        const d = await apiRequest(`/notifications?${qs}`, { auth: true });
+        state.items = append ? state.items.concat(d.notifications) : d.notifications;
+        state.more = d.more;
+        state.unread = d.unread;
+        render();
+      } catch (err) {
+        document.getElementById('ntList').innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+      }
+    }
+
+    // the bell in the top bar shows the same count
+    const bellCount = () => { if (window.navRefreshAccount) window.navRefreshAccount(); };
+
+    async function markRead(id) {
+      const n = state.items.find((x) => x._id === id);
+      if (!n || n.read) return;
+      try {
+        await apiRequest(`/notifications/${id}/read`, { method: 'PATCH', auth: true });
+        n.read = true;
+        state.unread = Math.max(state.unread - 1, 0);
+        render();
+        bellCount();
+      } catch (err) { /* stays unread */ }
+    }
+
+    const list = document.getElementById('ntList');
+    list.addEventListener('click', async (e) => {
+      const row = e.target.closest('.nt-item[data-id]');
+      if (!row) return;
+      const link = e.target.closest('a');
+      if (!link) { markRead(row.dataset.id); return; }
+      // "View booking" also counts as read: save that before leaving the page (a plain click only)
+      if (row.classList.contains('unread') && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        await markRead(row.dataset.id);
+        window.location.href = link.href;
+      }
+    });
+    list.addEventListener('keydown', (e) => {
+      const row = e.target.closest('.nt-item.unread');
+      if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); markRead(row.dataset.id); }
+    });
+    document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+      if (state.filter === b.dataset.filter) return;
+      state.filter = b.dataset.filter;
+      setPageParams({ filter: state.filter });
+      load();
+    }));
+    document.getElementById('ntReadAll').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        await apiRequest('/notifications/read-all', { method: 'PATCH', auth: true });
+        state.items.forEach((n) => { n.read = true; });
+        state.unread = 0;
+        render();
+        bellCount();
+      } catch (err) { /* nothing changed */ }
+      btn.disabled = false;
+    });
+    document.getElementById('ntMore').addEventListener('click', () => load(true));
+
+    load();
+  </script>
+</body>
+</html>

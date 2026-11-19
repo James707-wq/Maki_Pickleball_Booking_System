@@ -20,8 +20,7 @@ const UserSchema = new mongoose.Schema(
       match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
     },
     phone: { type: String, trim: true, default: '' },
-    // booking updates outside the website (only when the facility has SMS / email switched on)
-    notifySms: { type: Boolean, default: true },
+    // booking updates by email (only when the facility has email switched on)
     notifyEmail: { type: Boolean, default: true },
     password: {
       type: String,
@@ -48,6 +47,24 @@ const UserSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// AF-141: a new password or a deactivated account ends the person's sessions (their tokens stop working).
+// The token check refuses them anyway (passwordChangedAt, isActive); this keeps the session list true.
+UserSchema.pre('save', function (next) {
+  if (this.isNew) { this.$locals.endSessions = ''; return next(); }
+  if (this.isModified('password')) this.$locals.endSessions = 'Password changed';
+  else if (this.isModified('isActive') && this.isActive === false) this.$locals.endSessions = 'Account deactivated';
+  else this.$locals.endSessions = '';
+  this.$locals.endSessionsBefore = new Date(); // sessions started after the save (a new sign-in) stay open
+  next();
+});
+UserSchema.post('save', function (doc) {
+  const reason = doc.$locals.endSessions;
+  if (!reason) return;
+  doc.$locals.endSessions = '';
+  require('../utils/sessions').endAllFor(doc._id, { reason, before: doc.$locals.endSessionsBefore })
+    .catch((err) => console.error('Ending sessions failed:', err.message));
+});
 
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();

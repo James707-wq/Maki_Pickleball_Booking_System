@@ -8,6 +8,7 @@ const TransactionSchema = new mongoose.Schema(
   {
     booking: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking', required: true, index: true },
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+    customerName: { type: String, trim: true, default: '' }, // a walk-in guest's name (no account)
     referenceNumber: { type: String, required: true }, // booking reference, kept so rows survive booking edits
     courtName: { type: String, default: '' },
     type: { type: String, enum: ['payment', 'refund', 'failed'], required: true, index: true },

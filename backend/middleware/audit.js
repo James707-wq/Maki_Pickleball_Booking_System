@@ -19,9 +19,22 @@ const RULES = [
   [/^PATCH \/courts\/[^/]+\/status$/, 'Changed a court status'],
   [/^PATCH \/courts\/[^/]+\/price$/, 'Changed a court price'],
   [/^DELETE \/courts\/[^/]+$/, 'Removed a court'],
-  [/^PUT \/settings$/, 'Updated hours and booking rules'],
+  [/^PUT \/settings$/, 'Updated hours, booking rules or cancellation policy'],
   [/^POST \/blocks$/, 'Blocked a time slot'],
   [/^DELETE \/blocks\/[^/]+$/, 'Unblocked a time slot'],
+  [/^POST \/bookings$/, 'Made a walk-in booking'],
+  [/^POST \/maintenance$/, 'Reported a maintenance problem'],
+  [/^POST \/maintenance\/[^/]+\/note$/, 'Added a note to a maintenance report'],
+  [/^PATCH \/maintenance\/[^/]+$/, 'Updated a maintenance report'],
+  [/^POST \/incidents$/, 'Recorded an incident'],
+  [/^POST \/incidents\/[^/]+\/note$/, 'Added a note to an incident'],
+  [/^PATCH \/incidents\/[^/]+$/, 'Resolved or reopened an incident'],
+  [/^POST \/shifts$/, 'Assigned a shift'],
+  [/^PUT \/shifts\/[^/]+$/, 'Changed a shift'],
+  [/^DELETE \/shifts\/[^/]+$/, 'Removed a shift'],
+  [/^POST \/help$/, 'Asked the administrators for help'],
+  [/^POST \/help\/[^/]+\/reply$/, 'Replied to a help request'],
+  [/^PATCH \/help\/[^/]+$/, 'Closed or reopened a help request'],
   [/^PATCH \/bookings\/[^/]+\/status$/, 'Changed a booking status'],
   [/^PATCH \/bookings\/[^/]+\/reschedule$/, 'Rescheduled a booking'],
   [/^PATCH \/bookings\/[^/]+\/payment$/, 'Updated a booking payment'],
@@ -45,13 +58,37 @@ const RULES = [
   [/^POST \/integrations\/verify$/, 'Asked for a code to change integrations'],
   [/^POST \/integrations\/verify\/resend$/, 'Asked for a new integration code'],
   [/^PUT \/integrations$/, 'Turned integrations on or off'],
+  [/^POST \/integrations\/webhook\/verify$/, 'Asked for a code to change the custom API'],
+  [/^POST \/integrations\/webhook\/verify\/resend$/, 'Asked for a new custom API code'],
+  [/^PUT \/integrations\/webhook$/, 'Changed the custom API (webhook)'],
+  [/^POST \/integrations\/webhook\/test$/, 'Sent a custom API test event'],
+  [/^POST \/integrations\/webhook\/deliveries\/[^/]+\/retry$/, 'Sent a custom API event again'],
+  [/^POST \/integrations\/reset\/verify$/, 'Asked for a code to reset integrations'],
+  [/^POST \/integrations\/reset\/verify\/resend$/, 'Asked for a new integration reset code'],
+  [/^PUT \/integrations\/reset$/, 'Reset integrations to defaults'],
+  [/^POST \/api-tokens\/verify$/, 'Asked for a code to make an API token'],
+  [/^POST \/api-tokens\/verify\/resend$/, 'Asked for a new API token code'],
+  [/^POST \/api-tokens$/, 'Made an API token'],
+  [/^DELETE \/api-tokens\/[^/]+$/, 'Revoked an API token'],
   [/^PUT \/security\/pin$/, 'Set the security PIN'],
+  [/^DELETE \/sessions\/[^/]+$/, 'Ended a session'],
+  [/^POST \/users\/[^/]+\/sessions\/end$/, "Ended an account's sessions"],
+  [/^POST \/backups$/, 'Made a backup'],
+  [/^PUT \/backups\/settings$/, 'Changed automatic backups'],
+  [/^POST \/backups\/upload$/, 'Uploaded a backup file'],
+  [/^POST \/backups\/verify$/, 'Asked for a code for a backup'],
+  [/^POST \/backups\/verify\/resend$/, 'Asked for a new backup code'],
+  [/^POST \/backups\/download$/, 'Downloaded a backup'],
+  [/^POST \/backups\/restore$/, 'Restored a backup'],
+  [/^POST \/backups\/delete$/, 'Deleted a backup'],
+  [/^POST \/data\/checks\/[^/]+\/fix$/, 'Fixed a data problem'],
+  [/^POST \/data\/cleanup\/[^/]+$/, 'Deleted old records'],
 ];
 
 module.exports = (req, res, next) => {
   if (req.method === 'GET') return next();
   res.on('finish', () => {
-    if (res.statusCode >= 400 || !req.user) return;
+    if (res.statusCode >= 400 || !req.user || res.locals.noAudit) return; // noAudit: a POST that only checks, changing nothing
     const path = req.path;
     const key = `${req.method} ${path}`;
     const rule = RULES.find(([re]) => re.test(key));

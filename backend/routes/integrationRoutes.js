@@ -2,6 +2,7 @@
  * Admin side of the third-party integrations. Mounted inside adminRoutes, so every route
  * already requires a signed-in staff/admin account and writes are audit-logged.
  */
+const crypto = require('crypto');
 const express = require('express');
 const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
@@ -9,10 +10,12 @@ const Settings = require('../models/Settings');
 const { authorize } = require('../middleware/auth');
 const handleError = require('../utils/handleError');
 const U = require('../utils/bookingUtils');
-const { status, isActive, NAMES, LABELS, forgetSwitches } = require('../utils/integrations');
+const { status, isActive, NAMES, LABELS, forgetSwitches, planReset } = require('../utils/integrations');
 const { syncBookingToCalendar } = require('../utils/integrations/google');
 const hitpay = require('../utils/integrations/hitpay');
 const { getForecast, forecastLocation } = require('../utils/integrations/weather');
+const webhook = require('../utils/integrations/webhook');
+const { seal } = require('../utils/secretBox');
 const twoStep = require('../utils/twoStep');
 
 const router = express.Router();
@@ -30,6 +33,8 @@ router.get('/integrations', authorize('settings'), async (req, res) => {
       integrations: await status(),
       facility: { lat: s.facilityLat, lng: s.facilityLng, address: s.facilityAddress },
       security: twoStep.summary(req.user),
+      webhookFailed: await webhook.failedSince(new Date(Date.now() - 24 * 3600e3)), // custom API events that gave up today
+      env: require('../utils/envCheck').view(), // backend/.env: values that can't work, edits waiting for a restart (names only)
     });
   } catch (err) { handleError(res, err); }
 });
@@ -48,11 +53,11 @@ async function wantedChanges(body) {
   return { changes };
 }
 const sentence = (parts) => (parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]);
-const askText = (changes) => { // "Turn off HitPay and turn on SMS (Semaphore)"
+const askText = (changes) => { // "Turn off HitPay and turn on Email"
   const s = sentence(Object.entries(changes).map(([n, on]) => `turn ${on ? 'on' : 'off'} ${LABELS[n]}`));
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
-const doneText = (changes) => Object.entries(changes).map(([n, on]) => `${LABELS[n]} ${on ? 'on' : 'off'}`).join(', '); // "HitPay off, SMS (Semaphore) on"
+const doneText = (changes) => Object.entries(changes).map(([n, on]) => `${LABELS[n]} ${on ? 'on' : 'off'}`).join(', '); // "HitPay off, Email on"
 
 /**
  * Step 1: check the admin's PIN, keep the change, and send a one-time code to the admin.
@@ -106,7 +111,7 @@ router.put('/integrations', authorize('settings'), async (req, res) => {
   } catch (err) { handleError(res, err); }
 });
 
-/** Open-Meteo forecast for the facility location set under Opening hours. */
+/** Open-Meteo forecast for the facility location pinned under Location. */
 router.get('/integrations/weather', async (req, res) => {
   try {
     if (!(await isActive('weather'))) return res.json({ success: true, weather: null, off: true });
@@ -188,6 +193,229 @@ router.post('/bookings/:bookingId/hitpay-check', authorize('payments'), async (r
     const r = await hitpay.settleBooking(booking, { by: req.user._id });
     res.json({ success: true, paid: r.paid, alreadyPaid: Boolean(r.alreadyPaid), message: r.message || '', paymentStatus: r.booking.paymentStatus });
   } catch (err) { fail(res, err); }
+});
+
+/* -------- Custom API (webhook): the facility's own system gets signed booking events -------- */
+
+/** The custom API's settings as they are before it is set up (used by Remove and by Reset to defaults). */
+const WEBHOOK_CLEARED = {
+  'webhook.url': '', 'webhook.secret': '', 'webhook.secretHint': '', 'webhook.secretSetAt': null, 'webhook.events': [], 'webhook.includeContact': false,
+};
+
+/** Saved settings, the events that can be chosen and the latest deliveries (never the secret). */
+router.get('/integrations/webhook', authorize('settings'), async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      webhook: await webhook.adminView(),
+      events: Object.entries(webhook.EVENTS).map(([type, label]) => ({ type, label })),
+      retryMinutes: webhook.RETRY_MINUTES,
+      deliveries: await webhook.recentDeliveries(20),
+      security: twoStep.summary(req.user),
+    });
+  } catch (err) { handleError(res, err); }
+});
+
+/** The change an admin asked for, checked: { change, what } or { error, code }. A secret is only kept sealed. */
+async function webhookChange(body) {
+  const b = body || {};
+  const now = await webhook.adminView();
+  if (b.remove === true) {
+    if (!now.url && !now.secretSet) return { error: 'There is nothing to remove', code: 409 };
+    return { change: { remove: true }, what: 'Remove the custom API (webhook)' };
+  }
+  const url = String(b.url || '').trim();
+  const problem = webhook.addressProblem(url);
+  if (problem) return { error: problem };
+  const events = [...new Set(Array.isArray(b.events) ? b.events : [])].filter((e) => webhook.EVENTS[e]);
+  if (!events.length) return { error: 'Choose at least one event to send' };
+  const includeContact = b.includeContact === true;
+  const mode = ['keep', 'generate', 'custom'].includes(b.secretMode) ? b.secretMode : 'generate';
+  if (mode === 'keep' && !now.secretReadable) return { error: 'There is no saved secret to keep. Make a new one or enter your own.' };
+  let sealed = '';
+  let hint = '';
+  if (mode === 'custom') {
+    const own = String(b.secret || '');
+    if (own.length < 16 || own.length > 200 || /\s/.test(own)) return { error: 'Your own secret must be 16 to 200 characters, without spaces' };
+    sealed = seal(own); // sealed while it waits for the one-time code, too
+    hint = own.slice(-4);
+  }
+  const same = url === now.url && includeContact === now.includeContact && mode === 'keep'
+    && events.length === now.events.length && events.every((e) => now.events.includes(e));
+  if (same) return { error: 'Nothing changed', code: 409 };
+  const kinds = events.length === Object.keys(webhook.EVENTS).length ? 'all booking events' : `${events.length} kind${events.length === 1 ? '' : 's'} of booking event`;
+  const what = `${now.url ? 'Change the custom API' : 'Set up the custom API'}: send ${kinds} to ${new URL(url).host}${includeContact ? ', with customer contact details' : ''}`;
+  return { change: { url, events, includeContact, secretMode: mode, sealed, hint }, what };
+}
+
+/**
+ * Step 1: check the admin's PIN, keep the change, and send a one-time code (like the on/off switches).
+ * body: { url, events, includeContact, secretMode: 'keep'|'generate'|'custom', secret, pin }  or  { remove: true, pin }
+ */
+router.post('/integrations/webhook/verify', authorize('settings'), async (req, res) => {
+  try {
+    const w = await webhookChange(req.body);
+    if (w.error) return bad(res, w.error, w.code);
+    const pin = await twoStep.checkPin(req, req.body.pin);
+    if (!pin.ok) return twoStep.reply(res, pin);
+    const r = await twoStep.startChallenge(req, 'webhook', { webhook: w.change }, w.what);
+    if (!r.ok) return twoStep.reply(res, r);
+    res.locals.auditDetail = `${w.what}; code sent to ${r.sentTo.map((s) => s.label).join(', ')}`;
+    res.json({ success: true, what: w.what, ...twoStep.challengeView(r.challenge, r.sentTo) });
+  } catch (err) { handleError(res, err); }
+});
+
+/** A new code for a custom API change still waiting for one.   body: { challengeId } */
+router.post('/integrations/webhook/verify/resend', authorize('settings'), async (req, res) => {
+  try {
+    const r = await twoStep.resendChallenge(req, 'webhook', req.body.challengeId);
+    if (!r.ok) return twoStep.reply(res, r);
+    res.json({ success: true, ...twoStep.challengeView(r.challenge, r.sentTo) });
+  } catch (err) { handleError(res, err); }
+});
+
+/**
+ * Step 2: the one-time code. Saves the change kept in step 1 (never settings sent with this request) and
+ * alerts every admin. A secret made here is in this answer only: it is never shown again.   body: { challengeId, otp }
+ */
+router.put('/integrations/webhook', authorize('settings'), async (req, res) => {
+  try {
+    if (!req.body.challengeId) {
+      return bad(res, 'Changing the custom API needs your security PIN and a one-time code. Reload the page and try again.', 428);
+    }
+    const r = await twoStep.useChallenge(req, 'webhook', req.body.challengeId, req.body.otp);
+    if (!r.ok) return twoStep.reply(res, r);
+
+    const c = (r.challenge.payload && r.challenge.payload.webhook) || {};
+    let secret = '';
+    let set;
+    if (c.remove) {
+      set = { ...WEBHOOK_CLEARED };
+    } else {
+      if (!c.url || !Array.isArray(c.events)) return bad(res, 'Nothing to change');
+      set = { 'webhook.url': c.url, 'webhook.events': c.events, 'webhook.includeContact': Boolean(c.includeContact) };
+      if (c.secretMode === 'generate') {
+        secret = `whsec_${crypto.randomBytes(24).toString('base64url')}`;
+        Object.assign(set, { 'webhook.secret': seal(secret), 'webhook.secretHint': secret.slice(-4), 'webhook.secretSetAt': new Date() });
+      } else if (c.secretMode === 'custom' && c.sealed) {
+        Object.assign(set, { 'webhook.secret': c.sealed, 'webhook.secretHint': c.hint || '', 'webhook.secretSetAt': new Date() });
+      }
+    }
+    await Settings.get(); // creates the settings document the first time
+    await Settings.updateOne({ key: 'main' }, { $set: set });
+    forgetSwitches();
+
+    const what = r.challenge.what || 'Changed the custom API (webhook)';
+    const secretNote = secret ? '; a new signing secret was made' : c.secretMode === 'custom' ? '; their own signing secret was saved' : '';
+    res.locals.auditDetail = `${what}${secretNote} (confirmed with PIN and one-time code)`;
+    const alertEmailed = twoStep.alertAdmins(req, `${what}${secretNote}`);
+    res.json({ success: true, webhook: await webhook.adminView(), alertEmailed, ...(secret ? { secret } : {}) });
+  } catch (err) { handleError(res, err); }
+});
+
+/** Sends a test event now with the saved address and secret (works while switched off too). */
+const lastTest = new Map(); // admin id -> when they last sent a test
+router.post('/integrations/webhook/test', authorize('settings'), async (req, res) => {
+  try {
+    const v = await webhook.adminView();
+    if (!v.url || !v.secretReadable) return bad(res, 'Save an address and a secret first');
+    const who = String(req.user._id);
+    if (Date.now() - (lastTest.get(who) || 0) < 5000) return bad(res, 'Wait a few seconds between tests', 429);
+    lastTest.set(who, Date.now());
+    const d = await webhook.sendTest();
+    res.locals.auditDetail = `Test to ${new URL(v.url).host}: ${d ? d.status : 'not sent'}${d && d.responseStatus ? ` (${d.responseStatus})` : ''}`;
+    res.json({ success: true, delivery: d ? webhook.deliveryView(d) : null });
+  } catch (err) { handleError(res, err); }
+});
+
+/** Sends a failed booking event once more, now. */
+router.post('/integrations/webhook/deliveries/:deliveryId/retry', authorize('settings'), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.deliveryId)) return bad(res, 'Not found', 404);
+    const d = await webhook.retryDelivery(req.params.deliveryId);
+    if (!d) return bad(res, 'Only failed events can be sent again. Reload to see the latest.', 409);
+    res.locals.auditDetail = `${d.type}: ${d.status}${d.responseStatus ? ` (${d.responseStatus})` : ''}`;
+    res.json({ success: true, delivery: webhook.deliveryView(d) });
+  } catch (err) { handleError(res, err); }
+});
+
+/* -------- Reset to defaults: every switch back to its default position; the custom API only when asked -------- */
+
+/** What a reset would change right now: { switches, removeWebhook, webhookSet }. */
+async function resetPlan(alsoWebhook) {
+  const [now, w] = await Promise.all([status(), webhook.adminView()]);
+  const webhookSet = Boolean(w.url || w.secretSet);
+  return { ...planReset(now, { webhookSet, alsoWebhook }), webhookSet };
+}
+/** "Reset integrations to defaults: turn on Google Sign-In and Email and remove the custom API (webhook)" */
+function resetText(plan) {
+  const named = (on) => Object.entries(plan.switches).filter(([, v]) => v === on).map(([n]) => LABELS[n]);
+  const parts = [];
+  if (named(true).length) parts.push(`turn on ${sentence(named(true))}`);
+  if (named(false).length) parts.push(`turn off ${sentence(named(false))}`);
+  if (plan.removeWebhook) parts.push('remove the custom API (webhook)');
+  return `Reset integrations to defaults: ${sentence(parts)}`;
+}
+const resetEmpty = (plan) => !Object.keys(plan.switches).length && !plan.removeWebhook;
+
+/** What a reset would change, for the admin console to show before it asks for the PIN. */
+router.get('/integrations/reset', authorize('settings'), async (req, res) => {
+  try {
+    const plan = await resetPlan(false);
+    res.json({ success: true, switches: plan.switches, webhookSet: plan.webhookSet, security: twoStep.summary(req.user) });
+  } catch (err) { handleError(res, err); }
+});
+
+/** Step 1: check the PIN, keep the reset, send a one-time code.   body: { pin, webhook: true to also remove the custom API } */
+router.post('/integrations/reset/verify', authorize('settings'), async (req, res) => {
+  try {
+    const plan = await resetPlan(Boolean(req.body && req.body.webhook === true));
+    if (resetEmpty(plan)) return bad(res, 'Everything is already at the defaults', 409);
+    const pin = await twoStep.checkPin(req, req.body.pin);
+    if (!pin.ok) return twoStep.reply(res, pin);
+    const what = resetText(plan);
+    const r = await twoStep.startChallenge(req, 'integrations-reset', { reset: { switches: plan.switches, removeWebhook: plan.removeWebhook } }, what);
+    if (!r.ok) return twoStep.reply(res, r);
+    res.locals.auditDetail = `${what}; code sent to ${r.sentTo.map((s) => s.label).join(', ')}`;
+    res.json({ success: true, what, ...twoStep.challengeView(r.challenge, r.sentTo) });
+  } catch (err) { handleError(res, err); }
+});
+
+/** A new code for a reset still waiting for one.   body: { challengeId } */
+router.post('/integrations/reset/verify/resend', authorize('settings'), async (req, res) => {
+  try {
+    const r = await twoStep.resendChallenge(req, 'integrations-reset', req.body.challengeId);
+    if (!r.ok) return twoStep.reply(res, r);
+    res.json({ success: true, ...twoStep.challengeView(r.challenge, r.sentTo) });
+  } catch (err) { handleError(res, err); }
+});
+
+/**
+ * Step 2: the one-time code. Applies exactly the reset shown in step 1 (a switch someone moved since then is left
+ * alone) and alerts every admin.   body: { challengeId, otp }
+ */
+router.put('/integrations/reset', authorize('settings'), async (req, res) => {
+  try {
+    if (!req.body.challengeId) {
+      return bad(res, 'Resetting integrations needs your security PIN and a one-time code. Reload the page and try again.', 428);
+    }
+    const r = await twoStep.useChallenge(req, 'integrations-reset', req.body.challengeId, req.body.otp);
+    if (!r.ok) return twoStep.reply(res, r);
+
+    const saved = (r.challenge.payload && r.challenge.payload.reset) || {};
+    const changed = Object.fromEntries(Object.entries(saved.switches || {}).filter(([n, on]) => NAMES.includes(n) && typeof on === 'boolean'));
+    const set = Object.fromEntries(Object.entries(changed).map(([n, on]) => [`integrationSwitches.${n}`, on]));
+    if (saved.removeWebhook) Object.assign(set, WEBHOOK_CLEARED);
+    if (!Object.keys(set).length) return bad(res, 'Nothing to change');
+    await Settings.get(); // creates the settings document the first time
+    await Settings.updateOne({ key: 'main' }, { $set: set });
+    forgetSwitches();
+
+    const what = r.challenge.what || 'Reset integrations to defaults';
+    res.locals.auditDetail = `${what} (confirmed with PIN and one-time code)`;
+    const alertEmailed = twoStep.alertAdmins(req, what);
+    res.json({ success: true, changed, removedWebhook: Boolean(saved.removeWebhook), alertEmailed, integrations: await status() });
+  } catch (err) { handleError(res, err); }
 });
 
 module.exports = router;

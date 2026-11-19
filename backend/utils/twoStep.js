@@ -1,12 +1,12 @@
 /**
  * Two-step check for sensitive admin changes (turning integrations on or off):
  *   1. the admin's security PIN (created under My account, or the first time it is needed), then
- *   2. a 6-digit one-time code sent to the admin's email, and to their phone when SMS is set up.
+ *   2. a 6-digit one-time code sent to the admin's email.
  * After the change every admin gets a security alert (dashboard, plus email when it is set up).
  *
- * Codes and alerts go out whenever email/SMS is set up in backend/.env, even if those integrations are
+ * Codes and alerts go out whenever email is set up in backend/.env, even if the Email integration is
  * switched off, so turning "Email" off can never lock the admins out.
- * With no email or SMS set up, the code is printed in the server console instead, except with
+ * With no email set up, the code is printed in the server console instead, except with
  * NODE_ENV=production, where changes are refused until email is set up.
  */
 const crypto = require('crypto');
@@ -18,7 +18,6 @@ const SecurityCode = require('../models/SecurityCode');
 const sendEmail = require('./sendEmail');
 const auditSecurityEvent = require('./securityAudit');
 const { configured } = require('./integrations');
-const { sendSms, normalizePhMobile } = require('./integrations/messaging');
 const { PERMISSIONS } = require('../config/permissions');
 
 const MAX_TRIES = 5;       // wrong PINs/passwords in a row before a lock; wrong tries per code
@@ -162,14 +161,10 @@ const maskEmail = (email) => {
   const [name, domain] = String(email || '').split('@');
   return name && domain ? `${name[0]}${'*'.repeat(Math.min(Math.max(name.length - 1, 1), 6))}@${domain}` : '';
 };
-const phoneLabel = (phone) => `mobile ending in ${phone.slice(-4)}`;
-
-/** Where a code for this user goes: [{ channel: 'email' | 'sms' | 'console', label }]. */
+/** Where a code for this user goes: [{ channel: 'email' | 'console', label }]. */
 function destinations(user) {
   const out = [];
   if (configured.email() && user.email) out.push({ channel: 'email', label: maskEmail(user.email) });
-  const phone = configured.sms() && normalizePhMobile(user.phone);
-  if (phone) out.push({ channel: 'sms', label: phoneLabel(phone) });
   if (!out.length && consoleFallback()) out.push({ channel: 'console', label: 'the server console' });
   return out;
 }
@@ -187,8 +182,8 @@ function summary(user) {
 }
 
 /**
- * Sends the code on every channel that is set up. Returns where it went (empty when nothing worked).
- * A console entry has failed: true when email/SMS is set up but could not send just now.
+ * Sends the code by email. Returns where it went (empty when nothing worked).
+ * A console entry has failed: true when email is set up but could not send just now.
  */
 async function deliverCode(user, code, what) {
   const sent = [];
@@ -201,29 +196,22 @@ async function deliverCode(user, code, what) {
         `Use this code to confirm: <b>${esc(what)}</b>.`,
         { code },
         `It works once and expires in ${CODE_MINUTES} minutes. Never share it: nobody from the facility will ask you for it.`,
-        'If you did not just try to change the integrations, someone may know your password and PIN. Change both right away.',
+        'If you did not just ask for this code, someone may know your password and PIN. Change both right away.',
       ]),
     }, 'Security code email');
     if (ok) sent.push({ channel: 'email', label: maskEmail(user.email) }); else failed = true;
-  }
-  const phone = configured.sms() && normalizePhMobile(user.phone);
-  if (phone) {
-    try {
-      await sendSms(phone, `MAKI's PickleBall security code: ${code}. It confirms: ${what}. Expires in ${CODE_MINUTES} min. Never share it.`);
-      sent.push({ channel: 'sms', label: phoneLabel(phone) });
-    } catch (err) { console.error('Security code SMS failed:', err.message); failed = true; }
   }
   if (!sent.length && consoleFallback()) {
     console.log(`\n[security code] ${code}  for ${user.email}: ${what} (expires in ${CODE_MINUTES} minutes)\n`
       + (failed
         ? '  Shown here because the email could not be sent just now (see the error above).\n'
-        : '  Shown here because no email or SMS is set up. Set up email in backend/.env; with NODE_ENV=production codes are never printed.\n'));
+        : '  Shown here because email is not set up. Set up email in backend/.env; with NODE_ENV=production codes are never printed.\n'));
     sent.push({ channel: 'console', label: failed ? 'the server console (email failed)' : 'the server console', failed });
   }
   return sent;
 }
 
-const noChannelMessage = () => (configured.email() || configured.sms()
+const noChannelMessage = () => (configured.email()
   ? 'The code could not be sent. Try again in a minute.'
   : 'Codes are sent by email, but email is not set up. Add RESEND_API_KEY (or EMAIL_HOST, EMAIL_PORT, EMAIL_USER and EMAIL_PASS) to backend/.env and restart the server.');
 
@@ -316,8 +304,9 @@ const challengeView = (challenge, sentTo) => ({
 /**
  * Tells every active admin that integrations changed: a dashboard alert, plus an email when email is
  * set up. Runs in the background and never throws. Returns whether emails are being sent.
+ * `title` / `did` describe other sensitive actions, e.g. { title: 'Backup & restore', did: 'used Backup & restore' }.
  */
-function alertAdmins(req, changeSummary) {
+function alertAdmins(req, changeSummary, { title = 'Integrations changed', did = 'changed the integrations' } = {}) {
   const actor = `${req.user.firstName} ${req.user.lastName}`.trim();
   const actorEmail = req.user.email;
   const ip = ipOf(req);
@@ -328,24 +317,24 @@ function alertAdmins(req, changeSummary) {
       const roles = Object.keys(PERMISSIONS).filter((r) => PERMISSIONS[r].includes('settings'));
       const admins = await User.find({ role: { $in: roles }, isActive: { $ne: false } }).select('firstName email');
       await Notification.insertMany(admins.map((a) => ({
-        user: a._id, message: `Integrations changed by ${actor}: ${changeSummary}. Confirmed with PIN and one-time code.`,
+        user: a._id, message: `${title} by ${actor}: ${changeSummary}. Confirmed with PIN and one-time code.`,
       })));
       if (!emailOn) return;
       let emailed = 0;
       for (const a of admins) {
         const ok = await sendTwice({
           to: a.email,
-          subject: `Integrations changed: ${changeSummary}`,
+          subject: `${title}: ${changeSummary}`,
           html: emailHtml(a.firstName, [
-            `<b>${esc(actor)}</b> (${esc(actorEmail)}) changed the integrations on ${esc(when)} (Philippine time):`,
+            `<b>${esc(actor)}</b> (${esc(actorEmail)}) ${esc(did)} on ${esc(when)} (Philippine time):`,
             `<span style="display:block;background:#eef5fd;padding:10px 12px;border-radius:8px;"><b>${esc(changeSummary)}</b></span>`,
             `Confirmed with their security PIN and a one-time code. IP address: ${esc(ip)}.`,
-            'If you did not expect this, sign in to the admin console, check Audit logs and Integrations, and change your password.',
+            `If you did not expect this, sign in to the admin console, check Audit logs and ${esc(title.replace(/ changed$/, ''))}, and change your password.`,
           ]),
         }, `Integration alert email to ${maskEmail(a.email)}`);
         if (ok) emailed++;
       }
-      console.log(`Integration change alert emailed to ${emailed} of ${admins.length} admin(s): ${changeSummary}`);
+      console.log(`${title} alert emailed to ${emailed} of ${admins.length} admin(s): ${changeSummary}`);
     } catch (err) {
       console.error('Integration alert failed:', err.message);
     }
@@ -353,9 +342,34 @@ function alertAdmins(req, changeSummary) {
   return emailOn;
 }
 
+/**
+ * Tells every active admin about something the server noticed by itself (nobody did it in the admin console),
+ * e.g. backend/.env changed: a dashboard alert, plus an email when `email` is given and email is set up.
+ * `email.paragraphs` are HTML (escape anything from outside). Never throws: { notified, emailed }.
+ */
+async function alertAdminsFromServer(message, email = null) {
+  try {
+    const roles = Object.keys(PERMISSIONS).filter((r) => PERMISSIONS[r].includes('settings'));
+    const admins = await User.find({ role: { $in: roles }, isActive: { $ne: false } }).select('firstName email');
+    if (admins.length) await Notification.insertMany(admins.map((a) => ({ user: a._id, message: message.slice(0, 1000) })));
+    if (!email || !configured.email()) return { notified: admins.length, emailed: 0 };
+    let emailed = 0;
+    for (const a of admins) {
+      const ok = await sendTwice({ to: a.email, subject: email.subject, html: emailHtml(a.firstName, email.paragraphs) },
+        `Server alert email to ${maskEmail(a.email)}`);
+      if (ok) emailed += 1;
+    }
+    return { notified: admins.length, emailed };
+  } catch (err) {
+    console.error('Server alert failed:', err.message);
+    return { notified: 0, emailed: 0 };
+  }
+}
+
 /** Sends a fail() as the JSON error the admin console expects. */
 const reply = (res, r) => res.status(r.status || 400).json({ success: false, message: r.message, ...(r.needsPin ? { needsPin: true } : {}) });
 
 module.exports = {
-  pinProblem, checkPin, setPin, summary, startChallenge, resendChallenge, useChallenge, challengeView, alertAdmins, reply,
+  pinProblem, checkPin, setPin, summary, startChallenge, resendChallenge, useChallenge, challengeView, alertAdmins,
+  alertAdminsFromServer, reply,
 };

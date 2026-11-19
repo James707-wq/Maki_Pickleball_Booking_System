@@ -51,6 +51,11 @@
     const busy = (on, text = 'Logging in…') => { btn.disabled = on; btn.textContent = on ? text : 'Log In'; };
     const goIn = (token) => { localStorage.setItem('token', token); window.location.href = 'dashboard.html'; };
     const captcha = Integrations.mountTurnstile('#captcha', (t) => showMsg(msg, t));
+    // why the last session ended (signed out on another device, expired, ended by the facility)
+    try {
+      const why = sessionStorage.getItem('signedOutReason');
+      if (why) { sessionStorage.removeItem('signedOutReason'); showMsg(msg, why, 'note'); }
+    } catch (e) { /* storage off */ }
 
     Integrations.mountGoogle(document.getElementById('googleBox'), document.getElementById('googleBtn'), {
       text: 'continue_with',

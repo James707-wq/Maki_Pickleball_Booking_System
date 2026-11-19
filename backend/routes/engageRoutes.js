@@ -13,6 +13,7 @@ const Booking = require('../models/Booking');
 const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const handleError = require('../utils/handleError');
+const U = require('../utils/bookingUtils');
 
 // txRouter: write routes run as timestamped transactions (abort + restart on conflict)
 const router = require('../utils/concurrency').txRouter(express.Router());
@@ -27,16 +28,26 @@ const bad = (res, message, code = 400) => res.status(code).json({ success: false
 /** UF-130 - GET /api/announcements */
 router.get('/announcements', async (req, res) => {
   try {
-    const items = await Announcement.find({ published: true }).sort({ publishedAt: -1 }).limit(50).select('title body publishedAt');
+    // SF-128: staff instructions are not shown to customers
+    const items = await Announcement.find({ published: true, audience: { $ne: 'staff' } }).sort({ publishedAt: -1 }).limit(50).select('title body publishedAt');
     res.json({ success: true, announcements: items });
   } catch (err) { handleError(res, err); }
 });
 
 /** UF-128 - GET /api/notifications */
+// ?filter=unread  only unread ones;  ?before=<id>  the page after that one (Notifications page: Show older);  ?limit= (max 100)
+// unread is the true total, not just within this page
 router.get('/notifications', async (req, res) => {
   try {
-    const notifications = await Notification.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(30);
-    res.json({ success: true, notifications, unread: notifications.filter((n) => !n.read).length });
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
+    const filter = { user: req.user._id };
+    if (req.query.filter === 'unread') filter.read = false;
+    if (mongoose.isValidObjectId(req.query.before)) filter._id = { $lt: req.query.before };
+    const [rows, unread] = await Promise.all([
+      Notification.find(filter).sort({ _id: -1 }).limit(limit + 1), // newest first; ids grow with time
+      Notification.countDocuments({ user: req.user._id, read: false }),
+    ]);
+    res.json({ success: true, notifications: rows.slice(0, limit), unread, more: rows.length > limit });
   } catch (err) { handleError(res, err); }
 });
 router.patch('/notifications/read-all', async (req, res) => {
@@ -90,12 +101,16 @@ router.post('/feedback', async (req, res) => {
     const { bookingId } = req.body;
     if (!mongoose.isValidObjectId(bookingId)) return bad(res, 'Invalid booking');
     const booking = await Booking.findById(bookingId);
-    if (!booking || booking.user.toString() !== req.user._id.toString()) return bad(res, 'Booking not found', 404);
+    if (!booking || String(booking.user || '') !== String(req.user._id)) return bad(res, 'Booking not found', 404);
     if (booking.status !== 'completed') return bad(res, 'You can review a booking once it is completed');
     const fb = await Feedback.create({
       user: req.user._id, booking: booking._id, court: booking.court, courtName: booking.courtName,
       rating: Number(req.body.rating), comment: req.body.comment,
     });
+    if (fb.rating <= 2) { // SF-127/129: a poor rating is worth a look by the people at the desk
+      await U.notifyStaff(`New ${fb.rating}-star feedback for ${fb.courtName} (booking ${booking.referenceNumber})${fb.comment ? `: "${String(fb.comment).slice(0, 120)}"` : '.'}`,
+        'feedback.view', { link: '#/feedback' });
+    }
     res.status(201).json({ success: true, feedback: fb });
   } catch (err) { handleError(res, err); }
 });

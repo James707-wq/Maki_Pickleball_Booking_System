@@ -11,26 +11,28 @@
     document.head.appendChild(s);
   });
 
-  /** { googleClientId, turnstileSiteKey, features: { payOnline, map, weather, addToCalendar } } */
+  /** { googleClientId (staff), customerGoogleClientId, turnstileSiteKey, features: { payOnline, map, weather, addToCalendar } } */
   function config() {
     if (!configPromise) {
       configPromise = fetch(API + '/integrations/config')
         .then((r) => r.json())
         .catch(() => ({}))
-        .then((c) => ({ googleClientId: '', turnstileSiteKey: '', features: {}, ...c }));
+        .then((c) => ({ googleClientId: '', customerGoogleClientId: '', turnstileSiteKey: '', features: {}, ...c }));
     }
     return configPromise;
   }
 
   /**
-   * Renders the "Continue with Google" button into `box` (which also holds the "or" divider).
+   * Renders the customers' "Continue with Google" button into `box` (which also holds the "or" divider).
+   * It uses the customers' Google client: CUSTOM_GOOGLE_CLIENT_ID on the server, or GOOGLE_CLIENT_ID when that isn't set.
    * onCredential(credential) is called after the person picks their Google account.
    */
   async function mountGoogle(box, slot, { text = 'continue_with', onCredential }) {
     const cfg = await config();
-    if (!cfg.googleClientId) return false;
+    const clientId = cfg.customerGoogleClientId || cfg.googleClientId; // an older server only sends googleClientId
+    if (!clientId) return false;
     try { await loadScript('https://accounts.google.com/gsi/client'); } catch (e) { return false; }
-    google.accounts.id.initialize({ client_id: cfg.googleClientId, ux_mode: 'popup', itp_support: true, callback: ({ credential }) => onCredential(credential) });
+    google.accounts.id.initialize({ client_id: clientId, ux_mode: 'popup', itp_support: true, callback: ({ credential }) => onCredential(credential) });
     box.hidden = false;
     const width = Math.max(200, Math.min(400, Math.floor(slot.getBoundingClientRect().width) || 320));
     google.accounts.id.renderButton(slot, { type: 'standard', theme: 'outline', size: 'large', shape: 'rectangular', text, logo_alignment: 'center', width });
@@ -98,6 +100,23 @@
     return facilityPromise;
   };
   const directionsUrl = (loc) => `https://www.openstreetmap.org/directions?to=${loc.lat}%2C${loc.lng}`;
+  /** Directions to the pin in the apps people use (plain links, no keys). */
+  const directionLinks = (loc) => ({
+    google: `https://www.google.com/maps/dir/?api=1&destination=${loc.lat}%2C${loc.lng}`,
+    waze: `https://waze.com/ul?ll=${loc.lat}%2C${loc.lng}&navigate=yes`,
+    osm: directionsUrl(loc),
+  });
+
+  /** A Leaflet map with OpenStreetMap tiles inside `el` (loads Leaflet first). */
+  async function osmMap(el, center, zoom, options = {}) {
+    await loadLeaflet();
+    const map = L.map(el, { scrollWheelZoom: false, ...options }).setView(center, zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+    setTimeout(() => map.invalidateSize(), 60);
+    return map;
+  }
 
   /**
    * Fills `card` (hidden until ready) with a map of the facility, its address and a directions link.
@@ -115,13 +134,8 @@
       <div class="facility-map" style="height:${height}px" role="img" aria-label="Map showing where the facility is"></div>`;
     card.hidden = false;
     try {
-      await loadLeaflet();
-      const map = L.map(card.querySelector('.facility-map'), { scrollWheelZoom: false }).setView([lat, lng], zoom);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(map);
+      const map = await osmMap(card.querySelector('.facility-map'), [lat, lng], zoom);
       L.marker([lat, lng]).addTo(map);
-      setTimeout(() => map.invalidateSize(), 60);
     } catch (e) {
       card.querySelector('.facility-map').outerHTML = '<p class="subtitle" style="margin:8px 0 0;">The map could not load. Use "Get directions" instead.</p>';
     }
@@ -167,7 +181,26 @@
     </span>`;
   }
 
+  /* ---------- the facility's rules (booking rules, cancellation policy, payment) ---------- */
+  const escText = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const POLICY_TITLES = { booking: 'Booking rules', cancellation: 'Cancellation and refunds', payment: 'Payment' };
+  /**
+   * Fills `el` with the rules the admin set (admin -> Hours & rules) as lists, and shows it.
+   * parts: any of 'booking', 'cancellation', 'payment'. Returns the rules, or null when they could not load.
+   */
+  async function mountPolicy(el, parts = ['cancellation'], { headings = false } = {}) {
+    if (!el) return null;
+    const f = await facility();
+    const lines = f && f.rules && f.rules.lines;
+    if (!lines) return null;
+    el.innerHTML = parts.filter((p) => lines[p] && lines[p].length)
+      .map((p) => `${headings ? `<h2>${POLICY_TITLES[p]}</h2>` : ''}<ul class="policy-list">${lines[p].map((l) => `<li>${escText(l)}</li>`).join('')}</ul>`).join('');
+    el.hidden = false;
+    return f.rules;
+  }
+
   window.Integrations = {
-    config, mountGoogle, mountTurnstile, loadLeaflet, facility, mountFacilityMap, directionsUrl, calendarLinks, calendarButtons,
+    config, mountGoogle, mountTurnstile, loadLeaflet, osmMap, facility, mountFacilityMap, directionsUrl, directionLinks, calendarLinks, calendarButtons,
+    mountPolicy,
   };
 })();
