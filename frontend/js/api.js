@@ -112,3 +112,103 @@ document.addEventListener('DOMContentLoaded', () => {
     wrap.appendChild(btn);
   });
 });
+
+// ---- court photos: a court's own photo if the admin set one, otherwise a mockup picked from its id ----
+const COURT_PHOTOS = ['img/courts/court-1.jpg', 'img/courts/court-2.jpg', 'img/courts/court-3.jpg', 'img/courts/court-4.jpg', 'img/courts/court-5.jpg', 'img/courts/court-6.jpg'];
+function courtImage(court) {
+  const url = court && court.imageUrl ? String(court.imageUrl).trim() : '';
+  if (url && /^(https?:\/\/|img\/|\/img\/)/i.test(url)) return url;
+  const key = String((court && (court._id || court.name)) || '');
+  let h = 0;
+  for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return COURT_PHOTOS[h % COURT_PHOTOS.length];
+}
+
+// ---- toast: toast('Saved') / toast('Something failed', true) ----
+function toast(text, isError = false) {
+  let el = document.getElementById('makiToast');
+  if (!el) { el = document.createElement('div'); el.id = 'makiToast'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+  el.textContent = text;
+  el.classList.toggle('err', !!isError);
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ---- animated number: countUp(el, 12) ----
+function countUp(el, target) {
+  const end = Number(target) || 0;
+  if (!el) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || end === 0) { el.textContent = end; return; }
+  const start = performance.now(), dur = 700;
+  const step = (t) => {
+    const p = Math.min((t - start) / dur, 1);
+    el.textContent = Math.round(end * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// ---- micro-interactions shared by every customer page ----
+(function () {
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // scroll reveal for anything marked data-reveal
+  const io = 'IntersectionObserver' in window ? new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.08 }) : null;
+  function watch(root) {
+    (root || document).querySelectorAll('[data-reveal]:not(.in)').forEach((el, i) => {
+      if (!io || reduce) { el.classList.add('in'); return; }
+      el.style.transitionDelay = `${Math.min(i, 6) * 60}ms`;
+      io.observe(el);
+    });
+  }
+  window.revealIn = watch;
+  document.addEventListener('DOMContentLoaded', () => watch());
+
+  // cursor spotlight on .spot / cards
+  document.addEventListener('pointermove', (e) => {
+    const el = e.target.closest && e.target.closest('.spot, .court-card, .quick a, .stat');
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${e.clientX - r.left}px`);
+    el.style.setProperty('--my', `${e.clientY - r.top}px`);
+  }, { passive: true });
+
+  // ripple on button press
+  document.addEventListener('pointerdown', (e) => {
+    if (reduce) return;
+    const b = e.target.closest && e.target.closest('button:not(:disabled), .btn');
+    if (!b || b.classList.contains('pw-toggle')) return;
+    const r = b.getBoundingClientRect();
+    const s = document.createElement('span');
+    s.className = 'ripple';
+    s.style.left = `${e.clientX - r.left}px`;
+    s.style.top = `${e.clientY - r.top}px`;
+    b.appendChild(s);
+    setTimeout(() => s.remove(), 650);
+  });
+})();
+
+// ---- confetti burst in brand colours (used after a booking is made) ----
+function confetti() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const colors = ['#f9e20b', '#33d9ff', '#0a325e', '#0b4fa8', '#ffffff'];
+  const box = document.createElement('div');
+  box.setAttribute('aria-hidden', 'true');
+  box.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:70;overflow:hidden';
+  for (let i = 0; i < 80; i += 1) {
+    const p = document.createElement('i');
+    const size = 6 + Math.random() * 7;
+    p.style.cssText = `position:absolute;left:${Math.random() * 100}%;top:-20px;width:${size}px;height:${size * (Math.random() < .5 ? 1 : .45)}px;` +
+      `background:${colors[i % colors.length]};border-radius:${Math.random() < .3 ? '50%' : '2px'};box-shadow:0 0 0 1px rgba(10,50,94,.08);`;
+    box.appendChild(p);
+    p.animate([
+      { transform: 'translate3d(0,0,0) rotate(0deg)', opacity: 1 },
+      { transform: `translate3d(${(Math.random() - .5) * 240}px, ${window.innerHeight + 60}px, 0) rotate(${Math.random() * 720}deg)`, opacity: .9 },
+    ], { duration: 1800 + Math.random() * 1400, delay: Math.random() * 300, easing: 'cubic-bezier(.2,.6,.4,1)', fill: 'forwards' });
+  }
+  document.body.appendChild(box);
+  setTimeout(() => box.remove(), 3600);
+}

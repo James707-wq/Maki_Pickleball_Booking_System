@@ -49,6 +49,7 @@ router.get('/me', (req, res) => {
     success: true,
     user: {
       id: u._id, firstName: u.firstName, lastName: u.lastName, email: u.email, phone: u.phone, role: u.role,
+      avatar: u.avatar, // the customizable avatar (frontend/js/avatar.js), shown in the console sidebar
       pinSet: Boolean(u.securityPinSetAt), pinSetAt: u.securityPinSetAt || null, // security PIN for integration changes
     },
     permissions: PERMISSIONS[u.role] || [],

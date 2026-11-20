@@ -12,38 +12,46 @@
 <body class="app">
   <div class="navbar" data-nav="app"></div>
 
-  <div class="dash-container" style="max-width: 700px;">
-    <a href="courts.html" style="color:var(--primary); text-decoration:none; font-size:0.85rem;">&larr; Back to courts</a>
+  <div class="dash-container">
+    <a href="courts.html" class="back-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>All courts</a>
 
-    <div class="card" style="margin-top:12px;">
-      <div id="courtInfo"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
-    </div>
+    <div id="courtHero" class="court-hero" style="margin-top:14px;"></div>
 
-    <section class="card find-us" id="findUs" hidden style="margin-top:20px;"></section>
+    <!-- wide screens: the court and its rules on the left, booking on the right; phones: court, booking, then the rules -->
+    <div class="detail-grid">
+      <div class="card" id="courtInfo"><div class="skeleton" aria-label="Loading"><i></i><i></i><i></i></div></div>
 
-    <div class="card" style="margin-top:20px;">
-      <h2 style="margin-top:0;">View Schedule</h2>
-      <label for="dateInput">Select a date</label>
-      <input type="date" id="dateInput" />
-      <div id="weatherLine" class="weather-line" hidden aria-live="polite"></div>
+      <div class="card book-card">
+        <h2>Pick a date &amp; time</h2>
+        <div class="date-strip" id="dateStrip" aria-label="Next 14 days"></div>
+        <div class="date-row">
+          <label for="dateInput" style="margin:0;white-space:nowrap;">Or choose a date</label>
+          <input type="date" id="dateInput" />
+        </div>
+        <div id="weatherLine" class="weather-line" hidden aria-live="polite"></div>
+        <div class="slot-legend" aria-hidden="true"><span><i></i>Open</span><span><i class="sel"></i>Selected</span><span><i class="off"></i>Booked / closed</span></div>
 
-      <div id="slotsWrap">
-        <div class="empty">Pick a date to see available time slots.</div>
+        <div id="slotsWrap">
+          <div class="empty">Pick a date to see available time slots.</div>
+        </div>
+
+        <div id="selectionSummary" class="selection-summary"></div>
+        <div id="bookCaptcha" class="captcha"></div>
       </div>
 
-      <div id="selectionSummary" class="selection-summary"></div>
-      <div id="bookCaptcha" class="captcha"></div>
+      <!-- AF-136 / AF-137: the facility's booking rules and cancellation policy (admin -> Hours & rules) -->
+      <section class="card policy-card" id="policyCard" hidden>
+        <h2>Before you book</h2>
+        <div id="policyBody"></div>
+        <p class="subtitle" style="margin:6px 0 0;"><a href="terms.html">All terms and policies</a></p>
+      </section>
     </div>
 
-    <!-- AF-136 / AF-137: the facility's booking rules and cancellation policy (admin -> Hours & rules) -->
-    <section class="card policy-card" id="policyCard" hidden style="margin-top:20px;">
-      <h2 style="margin-top:0;">Before you book</h2>
-      <div id="policyBody"></div>
-      <p class="subtitle" style="margin:6px 0 0;"><a href="terms.html">All terms and policies</a></p>
-    </section>
+    <section class="card find-us" id="findUs" hidden style="margin-top:18px;"></section>
   </div>
 
   <script src="js/config.js"></script>
+  <script src="js/avatar.js"></script>
   <script src="js/nav.js"></script>
   <script src="js/api.js"></script>
   <script src="js/integrations.js"></script>
@@ -52,7 +60,7 @@
 
     const courtId = new URLSearchParams(window.location.search).get('id');
     const bookCaptcha = Integrations.mountTurnstile('#bookCaptcha', (t) => showMsg(document.getElementById('bookingMsg') || document.createElement('div'), t));
-    Integrations.mountFacilityMap(document.getElementById('findUs'), { height: 200 });
+    Integrations.mountFacilityMap(document.getElementById('findUs'), { height: 220 });
     const dateInput = document.getElementById('dateInput');
     let selectedSlot = null;
     let currentCourt = null;
@@ -65,13 +73,46 @@
     const startDate = pageParams().get('date');
     if (/^\d{4}-\d{2}-\d{2}$/.test(startDate || '') && startDate >= today) dateInput.value = startDate;
 
+    // quick-pick strip for the next 14 days (only the days the facility takes bookings for)
+    function buildDateStrip() {
+      const strip = document.getElementById('dateStrip');
+      const base = new Date(today + 'T00:00:00Z');
+      let html = '';
+      for (let i = 0; i < 14; i += 1) {
+        const d = new Date(base.getTime() + i * 864e5);
+        const iso = d.toISOString().slice(0, 10);
+        if (dateInput.max && iso > dateInput.max) break;
+        const wd = i === 0 ? 'Today' : d.toLocaleDateString('en-PH', { weekday: 'short', timeZone: 'UTC' });
+        const on = iso === dateInput.value;
+        html += `<button type="button" class="date-pill${on ? ' on' : ''}" data-date="${iso}" aria-pressed="${on}"><small>${wd}</small><b>${d.getUTCDate()}</b></button>`;
+      }
+      strip.innerHTML = html;
+    }
+    const markPills = () => document.querySelectorAll('.date-pill').forEach((p) => {
+      const on = p.dataset.date === dateInput.value;
+      p.classList.toggle('on', on);
+      p.setAttribute('aria-pressed', String(on));
+    });
+    // every way of picking a day (the strip, the date box) ends here; the address keeps the day for reloads and links
+    function pickDate(iso) {
+      if (iso) dateInput.value = iso;
+      markPills();
+      setPageParams({ date: dateInput.value === today ? '' : dateInput.value });
+      loadAvailability();
+    }
+    buildDateStrip();
+    document.getElementById('dateStrip').addEventListener('click', (e) => {
+      const pill = e.target.closest('.date-pill');
+      if (pill) pickDate(pill.dataset.date);
+    });
+
     // the facility's rules: how far ahead the calendar goes, and the policy shown before booking
     let RULES = null;
     Integrations.mountPolicy(document.getElementById('policyBody'), ['booking', 'cancellation']).then((rules) => {
       if (!rules) return;
       RULES = rules;
       document.getElementById('policyCard').hidden = false;
-      if (rules.lastBookableDate) dateInput.max = rules.lastBookableDate;
+      if (rules.lastBookableDate) { dateInput.max = rules.lastBookableDate; buildDateStrip(); }
       if (selectedSlot) renderSummary();
     });
 
@@ -81,15 +122,30 @@
         const data = await apiRequest(`/courts/${courtId}`, { auth: true });
         const c = data.court;
         currentCourt = c;
+        document.title = `${c.name} - MAKI's PickleBall Court`;
+        document.getElementById('courtHero').innerHTML = `
+          <img src="${esc(courtImage(c))}" alt="${esc(c.name)}" />
+          <div class="ch-text">
+            <div>
+              <span class="status-badge status-${esc(c.status)}">${esc(c.status)}</span>
+              <h1>${esc(c.name)}</h1>
+              <p>📍 ${esc(c.location)}</p>
+            </div>
+            <div class="price-big"><b>₱${esc(c.pricePerHour)}</b><span>per hour</span></div>
+          </div>`;
         el.innerHTML = `
-          <span class="status-badge status-${esc(c.status)}">${esc(c.status)}</span>
-          <h1 style="margin:6px 0;">${esc(c.name)}</h1>
-          <p style="color:var(--muted); margin-top:-6px;">${esc(c.location)}</p>
-          <p>${esc(c.description || '')}</p>
-          <p><strong>₱${esc(c.pricePerHour)}</strong> / hour &middot; Open ${esc(c.openTime)}–${esc(c.closeTime)}</p>
-          <div class="tags">${(c.facilities || []).map(f => `<span class="tag">${esc(f)}</span>`).join('')}</div>
+          <h2>About this court</h2>
+          <p style="margin:0;color:#334155;">${esc(c.description || 'A great spot for a friendly rally or a competitive match.')}</p>
+          <div class="facts">
+            <div class="fact"><span>Opens</span><b>${esc(c.openTime)}</b></div>
+            <div class="fact"><span>Closes</span><b>${esc(c.closeTime)}</b></div>
+            <div class="fact"><span>Slot length</span><b>${esc(c.slotDurationMinutes)} min</b></div>
+            <div class="fact"><span>Per slot</span><b>₱${Math.round(c.pricePerHour * c.slotDurationMinutes / 60)}</b></div>
+          </div>
+          ${(c.facilities || []).length ? `<h2 style="font-size:.95rem;margin:4px 0 8px;">Facilities</h2><div class="tags" style="display:flex;flex-wrap:wrap;gap:6px;">${c.facilities.map(f => `<span class="tag">${esc(f)}</span>`).join('')}</div>` : ''}
         `;
       } catch (err) {
+        document.getElementById('courtHero').hidden = true;
         el.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
       }
     }
@@ -124,7 +180,7 @@
         const data = await apiRequest(`/courts/${courtId}/availability?date=${dateInput.value}`, { auth: true });
 
         if (data.courtStatus !== 'available') {
-          wrap.innerHTML = `<div class="empty">This court is currently marked "${esc(data.courtStatus)}" and can't be booked.</div>`;
+          wrap.innerHTML = `<div class="empty-state"><div class="ill">🚧</div>This court is currently marked "${esc(data.courtStatus)}" and can't be booked.</div>`;
           return;
         }
         if (!data.slots.length) {
@@ -135,11 +191,13 @@
         wrap.innerHTML = `<div class="slots-grid" id="slotsGrid"></div>`;
         const grid = document.getElementById('slotsGrid');
 
-        data.slots.forEach(slot => {
+        data.slots.forEach((slot, i) => {
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = `slot-btn ${slot.status}`;
           btn.textContent = slot.startTime;
+          btn.style.animationDelay = `${Math.min(i, 20) * 18}ms`;
+          btn.title = slot.status === 'available' ? `${slot.startTime}–${slot.endTime}` : slot.status;
           btn.disabled = slot.status !== 'available'; // booked, blocked or already passed
           btn.addEventListener('click', () => selectSlot(slot, btn));
           grid.appendChild(btn);
@@ -168,23 +226,26 @@
       const fee = baseFee();
       const total = promo ? Math.max(fee - promo.discount, 0) : fee;
       summary.style.display = 'block';
+      const niceDate = new Date(dateInput.value + 'T00:00:00Z').toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
       summary.innerHTML = `
-        <strong>Booking Summary</strong>
-        <div style="margin-top:8px;">
-          Date: <strong>${esc(dateInput.value)}</strong><br>
-          Time: <strong>${esc(selectedSlot.startTime)}–${esc(selectedSlot.endTime)}</strong><br>
-          Fee: ${promo ? `<s style="color:var(--muted);">₱${fee}</s> ` : ''}<strong>₱${total}</strong>
-          ${promo ? `<br><span style="color:#14633c;font-size:.85rem;">Promo ${esc(promo.code)} applied: −₱${promo.discount}</span>` : ''}
+        <strong style="font-size:1rem;">Booking summary</strong>
+        <div class="summary-rows">
+          <div><span>Court</span><b>${esc(currentCourt.name)}</b></div>
+          <div><span>Date</span><b>${esc(niceDate)}</b></div>
+          <div><span>Time</span><b>${esc(selectedSlot.startTime)}–${esc(selectedSlot.endTime)}</b></div>
+          ${promo ? `<div><span>Promo ${esc(promo.code)}</span><b style="color:var(--good);">−₱${promo.discount}</b></div>` : ''}
+          <div class="total"><span>Total</span><span>${promo ? `<s style="color:var(--muted);font-size:.9rem;">₱${fee}</s> ` : ''}<b>₱${total}</b></span></div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:12px;">
-          <input id="promoInput" placeholder="Promo code (optional)" maxlength="20" value="${esc(promo ? promo.code : '')}" style="margin:0;text-transform:uppercase;" aria-label="Promo code" />
-          <button type="button" id="promoBtn" class="secondary" style="width:auto;margin:0;padding:0 16px;">${promo ? 'Remove' : 'Apply'}</button>
+        <div class="promo-row">
+          <input id="promoInput" placeholder="Promo code (optional)" maxlength="20" value="${esc(promo ? promo.code : '')}" aria-label="Promo code" />
+          <button type="button" id="promoBtn" class="secondary">${promo ? 'Remove' : 'Apply'}</button>
         </div>
         <div id="promoMsg" class="msg ${note ? noteType : ''}" ${note ? '' : 'style="display:none"'}>${esc(note)}</div>
-        <button type="button" id="confirmBookingBtn" class="cta" style="margin-top:14px;">Confirm Booking</button>
+        <button type="button" id="confirmBookingBtn" class="cta" style="margin-top:16px;">Confirm booking <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
         ${RULES ? `<p class="policy-note">${esc(RULES.lines.cancellation.slice(0, 2).join(' '))} <a href="#policyCard">Policy</a></p>` : ''}
         <div id="bookingMsg" class="msg"></div>
       `;
+      if (!note) summary.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       document.getElementById('confirmBookingBtn').addEventListener('click', confirmBooking);
       document.getElementById('promoBtn').addEventListener('click', async () => {
         if (promo) { promo = null; return renderSummary(); }
@@ -203,12 +264,10 @@
       const msg = document.getElementById('bookingMsg');
       const btn = document.getElementById('confirmBookingBtn');
       btn.disabled = true;
-      btn.textContent = 'Booking...';
+      btn.classList.add('is-busy');
 
       try {
-        if (bookCaptcha.needsWait()) btn.textContent = 'Checking…';
         const captchaToken = await bookCaptcha.getToken();
-        btn.textContent = 'Booking...';
         const data = await apiRequest('/bookings', {
           method: 'POST',
           auth: true,
@@ -226,14 +285,11 @@
         bookCaptcha.reset();
         showMsg(msg, err.message);
         btn.disabled = false;
-        btn.textContent = 'Confirm Booking';
+        btn.classList.remove('is-busy');
       }
     }
 
-    dateInput.addEventListener('change', () => {
-      setPageParams({ date: dateInput.value === today ? '' : dateInput.value });
-      loadAvailability();
-    });
+    dateInput.addEventListener('change', () => pickDate());
 
     loadCourtInfo();
     loadAvailability();

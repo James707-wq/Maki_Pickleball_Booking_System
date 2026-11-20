@@ -12,77 +12,186 @@
 <body class="app">
   <div class="navbar" data-nav="app"></div>
 
-  <div class="container">
-    <div class="card">
-      <h1>My Profile</h1>
-      <p class="subtitle">View and update your account details</p>
+  <div class="dash-container">
+    <div class="page-title">
+      <div><span class="eyebrow">Your space</span><h1>Profile</h1><p>Make it yours — design an avatar and keep your details up to date.</p></div>
+    </div>
 
-      <form id="profileForm">
-        <div class="row-2">
-          <div>
-            <label for="firstName">First name</label>
-            <input type="text" id="firstName" required />
-          </div>
-          <div>
-            <label for="lastName">Last name</label>
-            <input type="text" id="lastName" required />
+    <div class="profile-grid">
+      <section class="card" id="avatar" aria-labelledby="studioTitle">
+        <div class="studio-top">
+          <div class="studio-preview" id="avPreview"></div>
+          <div class="who">
+            <h2 id="studioTitle">Avatar studio</h2>
+            <p id="studioHint">Mix and match to build your player look.</p>
+            <div class="studio-actions">
+              <button type="button" class="secondary sm" id="avRandom"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.3"/><circle cx="15.5" cy="15.5" r="1.3"/><circle cx="15.5" cy="8.5" r="1.3"/><circle cx="8.5" cy="15.5" r="1.3"/></svg>Surprise me</button>
+              <button type="button" class="ghost sm" id="avUndo" disabled>Undo</button>
+              <button type="button" class="sm" id="avSave" disabled>Save avatar</button>
+            </div>
+            <div style="margin-top:8px;min-height:20px;"><span class="unsaved" id="avDirty" hidden>Unsaved changes</span></div>
           </div>
         </div>
+        <div class="studio-tabs" role="tablist" id="avTabs" aria-label="Avatar parts"></div>
+        <div class="studio-options" id="avOptions" role="group" aria-label="Choices"></div>
+      </section>
 
-        <label for="email">Email (cannot be changed)</label>
-        <input type="email" id="email" disabled />
+      <div class="profile-stack">
+        <div class="card">
+          <h2>Personal details</h2>
+          <p class="subtitle">View and update your account details</p>
 
-        <label for="phone">Phone</label>
-        <input type="tel" id="phone" placeholder="e.g. 0917 123 4567" />
+          <form id="profileForm">
+            <div class="row-2">
+              <div>
+                <label for="firstName">First name</label>
+                <input type="text" id="firstName" autocomplete="given-name" required />
+              </div>
+              <div>
+                <label for="lastName">Last name</label>
+                <input type="text" id="lastName" autocomplete="family-name" required />
+              </div>
+            </div>
 
-        <fieldset id="notifyPrefs" class="notify-prefs" hidden>
-          <legend>Booking updates</legend>
-          <label id="emailPref" class="check-row" hidden><input type="checkbox" id="notifyEmail" /> Email me booking updates (with a calendar file)</label>
-        </fieldset>
+            <label for="email">Email <span class="muted" style="font-weight:500;">(cannot be changed)</span></label>
+            <input type="email" id="email" disabled />
 
-        <button type="submit">Save Changes</button>
-        <div id="profileMsg" class="msg"></div>
-      </form>
-    </div>
+            <label for="phone">Phone</label>
+            <input type="tel" id="phone" placeholder="09XX XXX XXXX" autocomplete="tel" />
 
-    <div class="card" id="password" style="margin-top: 20px;">
-      <h1>Change Password</h1>
-      <p class="subtitle">Update your account password</p>
+            <fieldset id="notifyPrefs" class="notify-prefs" hidden>
+              <legend>Booking updates</legend>
+              <label id="emailPref" class="check-row" hidden><input type="checkbox" id="notifyEmail" /> Email me booking updates (with a calendar file)</label>
+            </fieldset>
 
-      <form id="passwordForm">
-        <label for="currentPassword">Current password</label>
-        <input type="password" id="currentPassword" required />
+            <button type="submit" id="profileBtn">Save changes</button>
+            <div id="profileMsg" class="msg"></div>
+          </form>
+        </div>
 
-        <label for="newPassword">New password</label>
-        <input type="password" id="newPassword" minlength="8" required />
+        <div class="card" id="password">
+          <h2>Change password</h2>
+          <p class="subtitle">Use at least 8 characters. Your other devices are signed out when it changes.</p>
 
-        <label for="confirmNewPassword">Confirm new password</label>
-        <input type="password" id="confirmNewPassword" minlength="8" required />
+          <form id="passwordForm">
+            <label for="currentPassword">Current password</label>
+            <input type="password" id="currentPassword" autocomplete="current-password" required />
 
-        <button type="submit">Change Password</button>
-        <div id="passwordMsg" class="msg"></div>
-      </form>
-    </div>
+            <label for="newPassword">New password</label>
+            <input type="password" id="newPassword" minlength="8" autocomplete="new-password" required />
 
-    <!-- AF-141: the devices signed in to this account -->
-    <div class="card" id="devices" style="margin-top: 20px;">
-      <h1>Where you're signed in</h1>
-      <p class="subtitle">Sign out any device you don't recognise, then change your password.</p>
-      <div id="sessionList"><div class="skeleton" aria-label="Loading"><i></i><i></i></div></div>
-      <button type="button" id="endOthers" class="secondary" hidden>Sign out all other devices</button>
-      <div id="sessionMsg" class="msg" role="status"></div>
+            <label for="confirmNewPassword">Confirm new password</label>
+            <input type="password" id="confirmNewPassword" minlength="8" autocomplete="new-password" required />
+
+            <button type="submit" class="secondary">Change password</button>
+            <div id="passwordMsg" class="msg"></div>
+          </form>
+        </div>
+
+        <!-- AF-141: the devices signed in to this account -->
+        <div class="card" id="devices">
+          <h2>Where you're signed in</h2>
+          <p class="subtitle">Sign out any device you don't recognise, then change your password.</p>
+          <div id="sessionList"><div class="skeleton" aria-label="Loading"><i></i><i></i></div></div>
+          <button type="button" id="endOthers" class="secondary" hidden>Sign out all other devices</button>
+          <div id="sessionMsg" class="msg" role="status"></div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script src="js/config.js"></script>
+  <script src="js/avatar.js"></script>
   <script src="js/nav.js"></script>
   <script src="js/api.js"></script>
   <script src="js/integrations.js"></script>
   <script>
     requireAuth();
 
+    // ---------- avatar studio ----------
+    const A = MakiAvatar;
+    const TABS = ['skin', 'hair', 'hairColor', 'eyes', 'brows', 'mouth', 'facial', 'hat', 'glasses', 'shirt', 'bg'];
+    const COLOR_TABS = ['skin', 'hairColor', 'shirt', 'bg'];
+    const NICE = { none: 'None', s1: 'Light', s2: 'Fair', s3: 'Medium', s4: 'Tan', s5: 'Brown', s6: 'Deep' };
+    let saved = A.clean(A.cached());
+    let draft = { ...saved };
+    let history = [];
+    let tab = 'hair';
+
+    function paintPreview(bump) {
+      const box = document.getElementById('avPreview');
+      box.innerHTML = A.svg(draft, { title: 'Your avatar preview' });
+      if (bump) { box.classList.remove('bump'); void box.offsetWidth; box.classList.add('bump'); }
+      const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+      document.getElementById('avSave').disabled = !dirty;
+      document.getElementById('avDirty').hidden = !dirty;
+      document.getElementById('avUndo').disabled = !history.length;
+    }
+    function renderTabs() {
+      document.getElementById('avTabs').innerHTML = TABS.map((k) =>
+        `<button type="button" role="tab" aria-selected="${k === tab}" data-tab="${k}">${A.LABELS[k]}</button>`).join('');
+    }
+    function renderOptions() {
+      const keys = A.keysOf(tab);
+      document.getElementById('avOptions').innerHTML = keys.map((v, i) => {
+        const on = draft[tab] === v;
+        const label = NICE[v] || v.replace(/([A-Z])/g, ' $1');
+        if (COLOR_TABS.includes(tab)) {
+          return `<div class="opt-wrap"><button type="button" class="opt swatch" data-v="${v}" aria-pressed="${on}" aria-label="${A.LABELS[tab]} ${i + 1}" style="animation-delay:${i * 25}ms"><span style="background:${A.OPTIONS[tab][v]}"></span></button></div>`;
+        }
+        return `<div class="opt-wrap"><button type="button" class="opt" data-v="${v}" aria-pressed="${on}" aria-label="${A.LABELS[tab]}: ${label}" style="animation-delay:${i * 25}ms">${A.svg({ ...draft, ...(tab === 'hair' ? { hat: 'none' } : {}), [tab]: v }, { size: 72, zoom: tab !== 'hat' })}</button><span class="opt-label">${label}</span></div>`;
+      }).join('');
+    }
+    function setDraft(next) {
+      history.push({ ...draft });
+      if (history.length > 30) history.shift();
+      draft = A.clean(next);
+      paintPreview(true);
+      renderOptions();
+    }
+    document.getElementById('avTabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tab]'); if (!b) return;
+      tab = b.dataset.tab; renderTabs(); renderOptions();
+      b.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    });
+    document.getElementById('avOptions').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]'); if (!b || draft[tab] === b.dataset.v) return;
+      setDraft({ ...draft, [tab]: b.dataset.v });
+    });
+    document.getElementById('avRandom').addEventListener('click', () => setDraft(A.random()));
+    document.getElementById('avUndo').addEventListener('click', () => {
+      if (!history.length) return;
+      draft = history.pop(); paintPreview(true); renderOptions();
+    });
+    document.getElementById('avSave').addEventListener('click', async () => {
+      const btn = document.getElementById('avSave');
+      btn.disabled = true; btn.classList.add('is-busy');
+      try {
+        const data = await apiRequest('/users/profile', { method: 'PUT', auth: true, body: { avatar: draft } });
+        saved = A.clean(data.user.avatar || draft);
+        draft = { ...saved }; history = [];
+        if (window.MakiNav) MakiNav.setUser(data.user);
+        toast('Avatar saved — looking good! 😎');
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        btn.classList.remove('is-busy');
+        paintPreview(false);
+      }
+    });
+    window.addEventListener('beforeunload', (e) => {
+      if (JSON.stringify(draft) !== JSON.stringify(saved)) { e.preventDefault(); e.returnValue = ''; }
+    });
+    if (new URLSearchParams(location.search).get('welcome')) {
+      document.getElementById('studioHint').textContent = 'Welcome aboard! Start by designing your player avatar.';
+    }
+    renderTabs(); renderOptions(); paintPreview(false);
+
     async function loadProfile() {
       const data = await apiRequest('/users/profile', { auth: true });
+      saved = A.clean(data.user.avatar); draft = { ...saved }; history = [];
+      renderOptions(); paintPreview(false);
+      if (window.MakiNav) MakiNav.setUser(data.user);
       document.getElementById('firstName').value = data.user.firstName;
       document.getElementById('lastName').value = data.user.lastName;
       document.getElementById('email').value = data.user.email;
@@ -100,7 +209,7 @@
       e.preventDefault();
       const msg = document.getElementById('profileMsg');
       try {
-        await apiRequest('/users/profile', {
+        const data = await apiRequest('/users/profile', {
           method: 'PUT',
           auth: true,
           body: {
@@ -111,7 +220,7 @@
           },
         });
         showMsg(msg, 'Profile updated successfully', 'success');
-        if (window.navRefreshAccount) window.navRefreshAccount(); // the name in the top bar
+        if (window.MakiNav) MakiNav.setUser(data.user); // the name in the top bar
       } catch (err) {
         showMsg(msg, err.message);
       }

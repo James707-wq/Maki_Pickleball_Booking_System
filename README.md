@@ -641,3 +641,11 @@ records their own version anyway, run `npm --prefix backend run backfill:writets
 - Court availability is computed on the fly from each court's `openTime`/
   `closeTime`/`slotDurationMinutes` minus any non-cancelled bookings for that
   date — there's no separate "slots" collection to keep in sync.
+
+## UI refresh (Nov 2026)
+
+- New minimal look across every customer and admin page: Plus Jakarta Sans type, soft aurora background, floating glass navbar (`frontend/js/nav.js`: Home, Book a court, My bookings, More, the notifications bell and the account menu; one Menu button on phones), cursor spotlight, button sheen and ripple, scroll reveal, count-up stats, confetti after booking.
+- Login, register, forgot/reset password and admin sign-in use a split photo layout. A new account starts on **Profile → Avatar studio**.
+- Court photos: mockups in `frontend/img/courts/court-1..6.jpg`. A court shows its own `imageUrl` if set, otherwise a mockup picked from its id. Admins can choose a mockup in **Courts → Add/Edit court → Court photo**.
+- Customizable avatar: `frontend/js/avatar.js` draws it; customers edit it in **Profile → Avatar studio**. Saved on the user as `avatar` (`PUT /api/users/profile`, choices validated in `backend/routes/userRoutes.js`). Shown in the navbar account menu, the dashboard and the console sidebar (`GET /api/admin/me` returns it).
+- `backend/config/db.js` (and the seed / create-admin scripts) look up the MongoDB Atlas address through public DNS (8.8.8.8, 1.1.1.1), for routers that refuse the `mongodb+srv://` lookup.

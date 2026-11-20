@@ -22,6 +22,14 @@ const UserSchema = new mongoose.Schema(
     phone: { type: String, trim: true, default: '' },
     // booking updates by email (only when the facility has email switched on)
     notifyEmail: { type: Boolean, default: true },
+    // customizable profile avatar - option keys only (see frontend/js/avatar.js), validated in backend/routes/userRoutes.js
+    avatar: {
+      type: new mongoose.Schema({
+        skin: String, hair: String, hairColor: String, eyes: String, brows: String, mouth: String,
+        facial: String, hat: String, glasses: String, shirt: String, bg: String,
+      }, { _id: false }),
+      default: undefined,
+    },
     password: {
       type: String,
       required: [true, 'Password is required'],

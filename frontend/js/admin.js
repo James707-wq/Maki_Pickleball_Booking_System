@@ -1280,7 +1280,7 @@ async function renderCourts(params) {
       <thead><tr><th>Court</th><th>Location</th><th class="r">Price / hour</th><th>Hours and slots</th><th>Status</th><th class="r">Upcoming</th><th></th></tr></thead>
       <tbody>${courts.length ? courts.map((c) => `
         <tr>
-          <td><b>${esc(c.name)}</b><span class="sub">${esc(c.courtNumber || '')}${c.facilities && c.facilities.length ? (c.courtNumber ? ' &middot; ' : '') + esc(c.facilities.join(', ')) : ''}</span></td>
+          <td><div class="court-cell"><img class="court-thumb" src="${esc(courtPhoto(c))}" alt="" loading="lazy" /><div><b>${esc(c.name)}</b><span class="sub">${esc(c.courtNumber || '')}${c.facilities && c.facilities.length ? (c.courtNumber ? ' &middot; ' : '') + esc(c.facilities.join(', ')) : ''}</span></div></div></td>
           <td>${esc(c.location)}</td>
           <td class="r num">${peso(c.pricePerHour)}</td>
           <td class="num">${esc(c.openTime)}–${esc(c.closeTime)}<span class="sub">${c.slotDurationMinutes}-minute slots</span></td>
@@ -1398,7 +1398,8 @@ function courtForm(c) {
       ${field('Location', `<input name="location" required value="${esc(v.location)}" placeholder="Main Building, Ground Floor" />`)}
       ${field('Description', `<textarea name="description">${esc(v.description)}</textarea>`)}
       ${field('Facilities', `<input name="facilities" value="${esc((v.facilities || []).join(', '))}" placeholder="Indoor, Lighting, Restroom, Parking" />`, 'Separate with commas. Customers can filter by these.')}
-      ${field('Photo link', `<input name="imageUrl" type="url" value="${esc(v.imageUrl)}" placeholder="https://..." />`)}
+      ${field('Court photo', `<input name="imageUrl" id="cfImage" value="${esc(v.imageUrl)}" placeholder="Pick a mockup below or paste https://..." />`, 'Leave empty to use an automatic mockup photo.')}
+      <div class="photo-pick" id="cfPick">${COURT_PHOTOS.map((p) => `<button type="button" data-photo="${p}" class="${v.imageUrl === p ? 'on' : ''}" aria-label="Use mockup photo ${p.slice(-5, -4)}"><img src="${p}" alt="" /></button>`).join('')}</div>
       <div class="row3">
         ${field('Opens', `<input name="openTime" type="time" required value="${esc(v.openTime)}" />`)}
         ${field('Closes', `<input name="closeTime" type="time" required value="${esc(v.closeTime)}" />`)}
@@ -1412,6 +1413,9 @@ function courtForm(c) {
       <div class="msg error hidden" role="alert"></div>
     </form>`, { wide: true });
   $('#cfCancel').onclick = closeModal;
+  const markPick = () => $('#cfPick').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.photo === $('#cfImage').value.trim()));
+  $('#cfPick').onclick = (e) => { const b = e.target.closest('[data-photo]'); if (!b) return; $('#cfImage').value = b.dataset.photo; markPick(); };
+  $('#cfImage').oninput = markPick;
   onSubmit($('#courtForm'), async (data) => {
     data.slotDurationMinutes = Number(data.slotDurationMinutes);
     await api(isNew ? '/courts' : `/courts/${c._id}`, { method: isNew ? 'POST' : 'PUT', body: data, version: isNew ? undefined : c.writeTS });
@@ -2945,6 +2949,19 @@ function paintMe() {
   const sub = document.querySelector('.brand-sub');
   if (sub) sub.textContent = staffOnly ? 'Staff console' : 'Admin console';
   document.title = `${staffOnly ? 'Staff' : 'Admin'} - MAKI's PickleBall Court`;
+  // the avatar the person designed on the customer site (frontend/js/avatar.js); the default one until they do
+  if (window.MakiAvatar && $('#meAv')) $('#meAv').innerHTML = MakiAvatar.svg(state.me.avatar, { size: 38 });
+}
+
+// mockup court photos (same set the customer site falls back to)
+const COURT_PHOTOS = ['img/courts/court-1.jpg', 'img/courts/court-2.jpg', 'img/courts/court-3.jpg', 'img/courts/court-4.jpg', 'img/courts/court-5.jpg', 'img/courts/court-6.jpg'];
+function courtPhoto(c) {
+  const url = c && c.imageUrl ? String(c.imageUrl).trim() : '';
+  if (url && /^(https?:\/\/|img\/|\/img\/)/i.test(url)) return url;
+  const key = String((c && (c._id || c.name)) || '');
+  let h = 0;
+  for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return COURT_PHOTOS[h % COURT_PHOTOS.length];
 }
 
 // press "/" to jump to the search box on any list screen

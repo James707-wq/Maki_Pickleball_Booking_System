@@ -12,11 +12,18 @@
 <body class="admin-login">
   <div class="login-wrap">
     <section class="login-art">
-      <img class="logo" src="img/logo.png" alt="MAKI's Pickleball Court" />
+      <img class="bgimg" src="img/courts/court-2.jpg" alt="" />
+      <div class="art-brand"><span class="mark"><img src="img/logo-mark.png" alt="" /></span><span>MAKI'S<small>STAFF &amp; ADMIN</small></span></div>
+      <div class="art-copy">
+        <h1>Run the courts,<br /><em>effortlessly.</em></h1>
+        <p>Approve bookings, verify payments and keep every schedule on track — from one calm dashboard.</p>
+        <div class="art-stats"><span><b>Live</b> schedule board</span><span><b>1-click</b> approvals</span><span><b>Daily</b> reports</span></div>
+      </div>
     </section>
 
     <section class="login-form">
       <form id="loginForm" novalidate aria-describedby="msg">
+        <span class="lock" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
         <h2>Staff sign in</h2>
         <p class="muted login-sub">For staff and administrator accounts. Use the email and password the facility gave you.</p>
 
@@ -27,11 +34,11 @@
         </div>
 
         <label class="f">Email
-          <input type="email" id="email" autocomplete="username" required autofocus />
+          <input type="email" id="email" autocomplete="username" placeholder="admin@maki.ph" required autofocus />
         </label>
         <label class="f">Password
           <span class="pw">
-            <input type="password" id="password" autocomplete="current-password" required />
+            <input type="password" id="password" autocomplete="current-password" placeholder="Your password" required />
             <button type="button" id="pwToggle" aria-label="Show password">Show</button>
           </span>
         </label>
@@ -41,7 +48,7 @@
 
         <button class="btn primary" id="submitBtn" type="submit"><span class="label">Sign in</span></button>
         <div id="msg" class="msg error hidden" role="alert" aria-live="assertive"></div>
-        <p class="login-alt"><a href="index.html" class="muted">Customer login</a></p>
+        <p class="back"><a href="index.html">← Back to customer login</a></p>
       </form>
     </section>
   </div>

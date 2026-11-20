@@ -10,72 +10,100 @@
 <meta name="theme-color" content="#0a325e" />
 </head>
 <body class="auth">
-  <div class="navbar" data-nav="guest"></div>
-
-  <div class="container">
-    <div class="card">
-      <div class="logo-banner"><img src="img/logo.png" alt="MAKI's Pickleball Court" /></div>
-      <h1>Create your account</h1>
-      <p class="subtitle">Book courts and manage your schedule</p>
-
-      <!-- Google Sign-In: shown only when the admin has it switched on -->
-      <div id="googleBox" class="oauth" hidden>
-        <div id="googleBtn" class="oauth-btn"></div>
-        <div class="divider"><span>or sign up with email</span></div>
+  <main class="auth-shell">
+    <aside class="auth-visual">
+      <img class="bgimg" src="img/courts/court-3.jpg" alt="" />
+      <a class="av-brand" href="index.html"><span class="mark"><img src="img/logo-mark.png" alt="" /></span><span>MAKI'S<small>PICKLEBALL COURT</small></span></a>
+      <div>
+        <h2>Your next rally<br>starts <em>here.</em></h2>
+        <p>Create a free account to book courts, track your games and get reminders.</p>
+        <div class="float-chips"><span class="float-chip">⚡ Book in <b>30 sec</b></span><span class="float-chip">🎾 Real-time slots</span><span class="float-chip">🔔 Smart reminders</span></div>
       </div>
-      <form id="registerForm">
-        <div class="row-2">
-          <div>
-            <label for="firstName">First name</label>
-            <input type="text" id="firstName" required />
+    </aside>
+    <section class="auth-panel">
+      <div class="auth-card">
+
+          <span class="eyebrow">🎉 Join the club</span>
+          <h1>Create your account</h1>
+          <p class="subtitle">It takes less than a minute. You can design your avatar right after.</p>
+
+          <!-- Google Sign-In: shown only when the admin has it switched on -->
+          <div id="googleBox" class="oauth" hidden>
+            <div id="googleBtn" class="oauth-btn"></div>
+            <div class="divider"><span>or sign up with email</span></div>
           </div>
-          <div>
-            <label for="lastName">Last name</label>
-            <input type="text" id="lastName" required />
+          <form id="registerForm">
+            <div class="row-2">
+              <div>
+                <label for="firstName">First name</label>
+                <input type="text" id="firstName" placeholder="Juan" autocomplete="given-name" required />
+              </div>
+              <div>
+                <label for="lastName">Last name</label>
+                <input type="text" id="lastName" placeholder="Dela Cruz" autocomplete="family-name" required />
+              </div>
+            </div>
+
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com" autocomplete="email" required />
+
+            <label for="phone">Phone (optional)</label>
+            <input type="tel" id="phone" placeholder="09XX XXX XXXX" autocomplete="tel" />
+
+            <label for="password">Password</label>
+            <input type="password" id="password" minlength="8" placeholder="At least 8 characters" autocomplete="new-password" required />
+            <div class="strength" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="strength-label" id="strengthLabel"></div>
+
+            <label for="confirmPassword">Confirm password</label>
+            <input type="password" id="confirmPassword" minlength="8" placeholder="Type it again" autocomplete="new-password" required />
+
+            <div id="captcha" class="captcha"></div>
+            <button type="submit" class="cta" id="submitBtn"><span class="btn-label">Create account</span> <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            <div id="msg" class="msg" role="alert" aria-live="assertive"></div>
+          </form>
+
+          <div class="links-row">
+            <span></span>
+            <a href="index.html">Already have an account?</a>
           </div>
-        </div>
-
-        <label for="email">Email</label>
-        <input type="email" id="email" required />
-
-        <label for="phone">Phone (optional)</label>
-        <input type="tel" id="phone" />
-
-        <label for="password">Password</label>
-        <input type="password" id="password" minlength="8" required />
-
-        <label for="confirmPassword">Confirm password</label>
-        <input type="password" id="confirmPassword" minlength="8" required />
-
-        <div id="captcha" class="captcha"></div>
-        <button type="submit" id="submitBtn">Create Account</button>
-        <div id="msg" class="msg" role="alert" aria-live="assertive"></div>
-      </form>
-
-      <div class="links-row">
-        <span></span>
-        <a href="index.html">Already have an account?</a>
       </div>
-    </div>
-  </div>
+    </section>
+  </main>
 
   <script src="js/config.js"></script>
-  <script src="js/nav.js"></script>
   <script src="js/api.js"></script>
   <script src="js/integrations.js"></script>
   <script>
+    // password strength meter
+    (function () {
+      const pw = document.getElementById('password'), bars = document.querySelectorAll('.strength i'), label = document.getElementById('strengthLabel');
+      const colors = ['#ef4444', '#f59e0b', '#22c38e', '#0b4fa8'], words = ['Too weak', 'Okay', 'Good', 'Strong'];
+      pw.addEventListener('input', () => {
+        const v = pw.value;
+        let score = 0;
+        if (v.length >= 8) score++;
+        if (/[A-Z]/.test(v) && /[a-z]/.test(v)) score++;
+        if (/\d/.test(v)) score++;
+        if (/[^A-Za-z0-9]/.test(v) || v.length >= 12) score++;
+        bars.forEach((b, i) => { b.style.background = v && i < score ? colors[Math.max(score - 1, 0)] : ''; });
+        label.textContent = v ? words[Math.max(score - 1, 0)] : '';
+      });
+    })();
+
     const regBtn = document.getElementById('submitBtn');
+    const regLabel = regBtn.querySelector('.btn-label');
+    const busy = (on, text) => { regBtn.disabled = on; regBtn.classList.toggle('is-busy', on); regLabel.textContent = on ? text : 'Create account'; };
     const captcha = Integrations.mountTurnstile('#captcha', (t) => showMsg(document.getElementById('msg'), t));
     Integrations.mountGoogle(document.getElementById('googleBox'), document.getElementById('googleBtn'), {
       text: 'signup_with',
       onCredential: async (credential) => {
-        regBtn.disabled = true; regBtn.textContent = 'Signing up with Google…';
+        busy(true, 'Signing up with Google…');
         try {
           const data = await apiRequest('/auth/google', { method: 'POST', body: { credential } });
           localStorage.setItem('token', data.token);
           window.location.href = 'dashboard.html';
         } catch (err) {
-          regBtn.disabled = false; regBtn.textContent = 'Create Account';
+          busy(false);
           showMsg(document.getElementById('msg'), err.message);
         }
       },
@@ -92,7 +120,7 @@
         return showMsg(msg, 'Passwords do not match');
       }
 
-      regBtn.disabled = true; regBtn.textContent = 'Creating account…';
+      busy(true, 'Creating account…');
       try {
         const captchaToken = await captcha.getToken();
         const data = await apiRequest('/auth/register', {
@@ -107,9 +135,9 @@
           },
         });
         localStorage.setItem('token', data.token);
-        window.location.href = 'dashboard.html';
+        window.location.href = 'profile.html?welcome=1#avatar'; // new players start by designing their avatar
       } catch (err) {
-        regBtn.disabled = false; regBtn.textContent = 'Create Account';
+        busy(false);
         captcha.reset();
         showMsg(msg, err.message);
       }

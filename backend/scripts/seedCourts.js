@@ -6,6 +6,8 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const mongoose = require('mongoose');
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']); // router DNS refuses the Atlas SRV lookup
 const Court = require('../models/Court');
 const Settings = require('../models/Settings');
 
