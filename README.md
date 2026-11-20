@@ -25,7 +25,7 @@ features below.
 | UF-118 | Booking Summary | summary card on `court-details.html` before confirming |
 | UF-119 | Booking Confirmation | `frontend/booking-confirmation.html` |
 | UF-120 | Booking Reference Number | auto-generated per booking (e.g. `MKI-...`) |
-| UF-121 | Payment Status | `paymentStatus` field (pending/paid/failed/refunded) |
+| UF-121 | Payment Status | `paymentStatus` field (pending/paid/failed/refunded). Customers pay at the front desk; there is no online payment and no payment method to choose, and none is recorded |
 | UF-122 | Payment Receipt | `booking-confirmation.html` shows a printable receipt only once the booking is approved and paid; before that it shows booking details and payment status |
 | UF-123 | My Bookings | `GET /api/bookings` · `frontend/my-bookings.html` |
 | UF-124 | Booking History | Allows users to view their previous completed, cancelled, or expired bookings. |
@@ -90,7 +90,7 @@ The whole admin console is one page: `frontend/admin.html` (+ `frontend/js/admin
 | AF-118 | Booking Rescheduling | Bookings → Reschedule (date, time, court; conflicts refused) |
 | AF-119 | Booking Status Management | `PATCH /api/admin/bookings/:id/status` |
 | AF-120 | Payment Management | Payments (mark paid / failed / refunded) |
-| AF-121 | Payment Verification | `/api/admin/payments/verification`, `POST /api/admin/bookings/:id/verify-payment` · Payments → Verification |
+| AF-121 | Payment Verification | `/api/admin/payments/verification`, `POST /api/admin/bookings/:id/verify-payment` · Payments → Verification (customers no longer send a method and reference; this lists any sent before that change) |
 | AF-122 | Refund Management | `/api/admin/refunds` · Payments → Refunds: what the cancellation policy says to give back, partial refunds, "refund anyway" |
 | AF-123 | Transaction History | `/api/admin/transactions` · Payments → Transactions (search, type, dates, Export CSV) |
 | AF-124 | Customer Booking History | `/api/admin/users/:id/bookings` · People → Customers → History |
@@ -105,7 +105,7 @@ The whole admin console is one page: `frontend/admin.html` (+ `frontend/js/admin
 | AF-133 | Revenue Analytics | `/api/admin/analytics/revenue` · Insights → Revenue analytics |
 | AF-134 | User Analytics | `/api/admin/analytics/users` · Insights → User analytics |
 | AF-135 | Audit Logs | `backend/middleware/audit.js` · Security → Audit logs (Export CSV) |
-| AF-136 | System Settings | `/api/admin/settings` · Courts → Hours & rules: opening hours, booking rules, payment methods and instructions; plus Location and Integrations |
+| AF-136 | System Settings | `/api/admin/settings` · Courts → Hours & rules: opening hours, booking rules and the cancellation policy; plus Location and Integrations |
 | AF-137 | Cancellation Policy Management | Hours & rules → Cancellation and refunds (cut-off, full-refund window, late refund %) · `backend/utils/policy.js` |
 | AF-138 | Backup and Restore | `/api/admin/backups*` · Data → Backup & restore (daily automatic backups; download, restore and delete need PIN + one-time code) |
 | AF-139 | Data Management | `/api/admin/data` · Data → Data checks (find and fix records that disagree, clean up old records, record counts) |
@@ -143,13 +143,10 @@ and **My account**.
 Each one is optional. It runs only when its keys are in `backend/.env` (see the comments in
 `backend/.env.example` for where to get them) **and** it is switched on under admin -> **Integrations**
 (sidebar), where admins can turn each one on or off without restarting the server.
-Turning HitPay off stops new payment links, but payments already made on a link are still recorded.
 
 **Customers use them too, but only admins can change them.** The same switches control the customer site:
 Google sign-in / sign-up on `index.html` and `register.html` (`POST /api/auth/google`; a new email gets a customer
-account; it uses `CUSTOM_GOOGLE_CLIENT_ID` when that is set, otherwise `GOOGLE_CLIENT_ID`), the invisible Turnstile check on customer login, sign-up and password reset, "Pay online now" on a booking
-(`POST /api/bookings/:id/pay-online`, then `POST /api/bookings/:id/pay-online/check` when the customer comes back from
-HitPay's checkout), the forecast for the chosen date on `court-details.html` (`GET /api/weather`),
+account; it uses `CUSTOM_GOOGLE_CLIENT_ID` when that is set, otherwise `GOOGLE_CLIENT_ID`), the invisible Turnstile check on customer login, sign-up and password reset, the forecast for the chosen date on `court-details.html` (`GET /api/weather`),
 the facility map on `support.html` (`GET /api/facility`) and "Add to Google Calendar" on confirmed bookings.
 Map, calendar and human check for customers in detail:
 - **Map**: a "Find us" card with directions on Courts, each court page, the dashboard, the booking page and Support
@@ -203,9 +200,9 @@ The defaults are the ones declared in `backend/models/Settings.js`.
 
 **Server settings check (`backend/.env`).** The server tells the admins when its settings change and when a value can't work:
 - *At every start* it compares `backend/.env` with the previous start: a service that is now set up or no longer set up
-  ("Google Calendar is now set up", "HitPay is no longer set up") and keys added, changed or removed. It also checks
+  ("Google Calendar is now set up", "Email is no longer set up") and keys added, changed or removed. It also checks
   each value, e.g. a Google client *secret* (`GOCSPX-...`) pasted where the client ID belongs, a private key that can't
-  be read, `HITPAY_SANDBOX` that isn't true/false, an `EMAIL_HOST` with `smtp://` or a port in it, `JWT_SECRET` still being
+  be read, an `EMAIL_HOST` with `smtp://` or a port in it, `JWT_SECRET` still being
   the example value, or a service with only some of its keys. Every admin gets a dashboard alert and an email (when email
   is set up), and it goes into the audit log. A problem is reported once, until it is fixed.
 - *While running* it watches the file: when it is edited, every admin gets a dashboard alert naming the keys that
@@ -224,12 +221,12 @@ checks), tests in `backend/tests/envcheck.test.js`.
 |---|---|---|---|
 | `RATE_LIMIT_AUTH` | sign-in, sign-up, password reset, Google sign-in (`/api/auth/*`) | IP address | `30/15m` |
 | `RATE_LIMIT_API` | every other `/api` request | account when signed in, otherwise IP address | `300/1m` |
-| `RATE_LIMIT_CREATE` | making bookings, payment proofs and payment links, feedback, support messages, broadcasts, announcements | account when signed in, otherwise IP address | `20/10m` |
+| `RATE_LIMIT_CREATE` | making bookings, feedback, support messages, broadcasts, announcements | account when signed in, otherwise IP address | `20/10m` |
 
 Over a limit the server answers `429` with `Retry-After`, the standard `RateLimit` / `RateLimit-Policy` headers and
 `{ success: false, code: "RATE_LIMITED", limit, retryAfter, message }`. **`GET /api/rate-limit`** shows the caller where
 they stand (`limit`, `used`, `remaining`, `resetsAt` for each limit) and is not counted itself. IPv6 addresses are
-counted by their /64 network. The HitPay webhook is never limited. Admins see the limits and who was refused in the
+counted by their /64 network. Admins see the limits and who was refused in the
 last 24 hours under **Security → Login security** (`GET /api/admin/rate-limits`); each refusal is audit-logged (at most
 once an hour per person or address), and a sign-in flood also sends every admin a dashboard alert. On a live server
 behind a proxy, set `TRUST_PROXY=1` (the number of proxies) so each visitor's real IP address is used. Counts are kept in
@@ -264,14 +261,14 @@ Bookings look the same as in the custom API's webhook events. Refusals: `401` `T
 | Google Calendar | Confirmed bookings appear on the facility calendar and are updated or removed when moved, cancelled or rejected. "Sync upcoming bookings" button for existing ones. | `GOOGLE_CALENDAR_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` |
 | Cloudflare Turnstile | Human check on the admin sign-in form | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` |
 | Leaflet + OpenStreetMap | Map to pin the facility location (Location) | none |
-| HitPay | "Send payment link" in a booking (GCash, QR Ph, cards, GrabPay, ShopeePay: whatever your HitPay account has on). The customer gets a **Pay online now** button, pays on HitPay's checkout and comes back to the booking. It is marked paid by the webhook, when the customer comes back, or when staff press "Check payment"; each time the server asks HitPay for the real status. | `HITPAY_API_KEY`, `HITPAY_SANDBOX` (`true` for sandbox keys, `false` for live), optional `HITPAY_WEBHOOK_SALT` |
 | Open-Meteo | Weather forecast with rain chances on the admin dashboard | none (needs the facility location) |
 | Email (Resend, or SMTP) | Emails customers booking updates (received, approved, not approved, cancelled, moved, paid, refunded, expired) and the 2-hour reminder; the approval email carries a calendar file. Password resets and admin one-time codes always use it when set up | `RESEND_API_KEY` + `EMAIL_FROM`, or `EMAIL_HOST/PORT/USER/PASS` |
 | QR check-in | Confirmed bookings show a signed QR code; staff press **Verify booking (QR or reference)** under Check-ins or on the Dashboard, scan it (or type the reference), see whether it is good to play now, then **Check in now** | none |
 | Custom API (webhook) | Sends signed booking events to your own system (see below) | none in `.env`: the address and secret are set in the admin console |
 
 Code: `backend/utils/integrations/`, `backend/routes/integrationRoutes.js` (admin) and
-`backend/routes/publicIntegrationRoutes.js` (login-page config and `POST /api/webhooks/hitpay`).
+`backend/routes/publicIntegrationRoutes.js` (login-page config, map and weather; no login needed). Online payment
+(HitPay) was removed: customers pay at the front desk, and left-over `HITPAY_*` keys in `backend/.env` are listed as unused.
 
 ### Custom API (webhook)
 Sends booking events to the facility's own system: another booking app, a spreadsheet through Zapier, Make or n8n,
@@ -288,7 +285,7 @@ Saving asks for the security PIN and a one-time code, like the on/off switches, 
 | `booking.cancelled` | cancelled by the customer or staff, or expired without approval |
 | `booking.rescheduled` | moved to another date, time or court (also by the customer) |
 | `booking.completed` | its time is over |
-| `booking.paid` / `booking.refunded` | payment recorded (by staff or HitPay) / refunded |
+| `booking.paid` / `booking.refunded` | payment recorded by staff / refunded |
 | `booking.checked_in` | checked in at the desk, by QR scan, or by the customer |
 
 Each event is a `POST` of JSON:
@@ -305,7 +302,7 @@ Each event is a `POST` of JSON:
       "date": "2026-11-20", "startTime": "08:00", "endTime": "09:00",
       "start": "2026-11-20T08:00:00+08:00", "end": "2026-11-20T09:00:00+08:00",
       "totalFee": 400, "discount": 0, "promoCode": "", "currency": "PHP",
-      "paymentStatus": "pending", "paymentMethod": "", "paidAt": null, "checkedInAt": null,
+      "paymentStatus": "pending", "paidAt": null, "checkedInAt": null,
       "customer": { "id": "...", "name": "Juan Dela Cruz" },
       "createdAt": "..."
     },
@@ -360,10 +357,10 @@ app.post('/makis-events', express.raw({ type: 'application/json' }), (req, res) 
 | SF-114 Check-in Processing | **Check in now** after verifying, **Check in** in a booking on its day, or the Check-ins list |
 | SF-115 Check-out Processing | **Check out** in a booking or on the Check-ins list; the court stops showing as occupied |
 | SF-116 Customer Information | A booking → **Their bookings and contact**: email, mobile and every booking of that customer (the full customer list stays with admins) |
-| SF-117 Payment Verification | Payments → Verification: check the reference a customer sent, approve or reject with a reason; the customer is told |
-| SF-118 Payment Recording | A booking → Payment: method and **Mark paid** (cash at the desk); it goes into Transaction history with the staff member's name |
+| SF-117 Payment Verification | Payments → Verification: approve or reject a payment reference a customer sent before payment methods were removed (none can be sent now); the customer is told |
+| SF-118 Payment Recording | A booking → Payment → **Mark paid** (no payment method is chosen); it goes into Transaction history with the staff member's name |
 | SF-119 Receipt Generation | A paid booking → **Receipt** (also opens by itself after a walk-in pays at the desk) → **Print receipt** prints only the receipt |
-| SF-120 Refund Processing | Payments → Refunds: what the cancellation policy says to give back; record the refund (amount, method, reason) |
+| SF-120 Refund Processing | Payments → Refunds: what the cancellation policy says to give back; record the refund (amount and reason) |
 | SF-121 Court Status Update | Courts → Status: available, maintenance, closed, unavailable. A court being played on shows **Occupied until ...** with who is on it |
 | SF-122 Maintenance Reporting | **Report a problem** (Courts → Maintenance, or the Courts page): where, what kind, how urgent, optionally set the court to maintenance. Admins are alerted at once and set it to being fixed / fixed; the reporter is told |
 | SF-123 Court Assignment | A booking → **Assign court...**: pick a free court for the same time; the fee stays what the customer agreed to; works while they are already playing |
@@ -375,7 +372,7 @@ app.post('/makis-events', express.raw({ type: 'application/json' }), (req, res) 
 | SF-129 Customer Feedback | Customer care → Feedback (read only; hiding and reviewing stay with admins). A 1- or 2-star rating alerts the staff |
 | SF-130 Incident Reporting | Customer care → Incidents → **Record an incident** (or from a booking): kind, when, what happened, what was done, serious or not. Admins are alerted and resolve it; staff add notes |
 | SF-131 Daily Booking Report | Insights → Daily report: reservations by status and source, arrivals (checked in, on court, finished, no check-in), payments for the day, court usage; Print and CSV |
-| SF-132 Payment Report | Payments → Shift payments: what was received and refunded during your shift (or any times on a day), by payment method and by staff member, every transaction; "Only what I recorded"; Print for the handover |
+| SF-132 Payment Report | Payments → Shift payments: what was received and refunded during your shift (or any times on a day), by staff member, every transaction; "Only what I recorded"; Print for the handover |
 | SF-133 Court Utilization | Courts → Court usage: an hour-by-court grid (booked, on court, finished, waiting for approval, blocked, free, closed), courts in use now, usage per court and for the day, busiest time; today updates every minute |
 | SF-134 Shift Information | My account → My shifts (and on the Dashboard: "On shift until 16:00"). Admins assign shifts under People → Shifts; staff are told when one is added, changed or removed |
 | SF-135 Activity Log | My account → My activity: everything you did in the console, including signing in and out. Admins see everyone's under Security → Audit logs, with a Staff only filter |
@@ -404,8 +401,8 @@ Set under **Courts → Hours & rules**; the card beside the form shows what cust
 - **Cancellation and refunds**: until how many hours before the start customers can cancel or move a booking; how
   early a cancellation must be for a full refund, and the percentage later ones get back. When the facility cancels
   or rejects a paid booking, or it expires unapproved, the refund is always the full fee.
-- **Payments**: the payment methods customers can choose when they send their reference, and instructions shown
-  above that form (e.g. your GCash number).
+- **Payments**: there is nothing to set up: no payment methods and no online payment. Customers pay at the front desk,
+  and the rules tell them that.
 - Customers see the rules on the booking page, on My Bookings (each booking says until when it can be cancelled) and
   on Terms. The cancel dialog shows exactly what comes back before they confirm.
 - A cancelled paid booking stays **paid** and waits under **Payments → Refunds** with the amount the policy says to

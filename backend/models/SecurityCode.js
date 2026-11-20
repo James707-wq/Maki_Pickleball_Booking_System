@@ -9,8 +9,8 @@ const SecurityCodeSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     purpose: { type: String, required: true },                   // 'integrations'
-    what: { type: String, default: '' },                          // e.g. "Turn off HitPay"
-    payload: { type: mongoose.Schema.Types.Mixed, default: {} },  // e.g. { switches: { hitpay: false } }
+    what: { type: String, default: '' },                          // e.g. "Turn off Weather"
+    payload: { type: mongoose.Schema.Types.Mixed, default: {} },  // e.g. { switches: { weather: false } }
     codeHash: { type: String, required: true },
     sentTo: { type: [String], default: [] },                      // masked, e.g. "j****@gmail.com"
     attempts: { type: Number, default: 0 },                       // wrong codes for the current code

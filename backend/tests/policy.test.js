@@ -12,23 +12,22 @@ const bk = (dateStr, start, extra = {}) => ({
 });
 const rules = (r) => ({ rules: r }); // like a Settings document
 
-test('defaults: no limits, full refunds, the usual payment methods; broken values fall back to them', () => {
-  assert.deepEqual(P.rulesOf(null), { ...P.DEFAULTS, paymentMethods: P.DEFAULT_METHODS });
-  const r = P.rulesOf(rules({ maxAdvanceDays: -3, lateRefundPercent: 150, cancelCutoffHours: 2.5, paymentMethods: [] }));
+test('defaults: no limits, full refunds; broken values fall back to them', () => {
+  assert.deepEqual(P.rulesOf(null), { ...P.DEFAULTS });
+  const r = P.rulesOf(rules({ maxAdvanceDays: -3, lateRefundPercent: 150, cancelCutoffHours: 2.5, paymentMethods: ['GCash'] }));
   assert.equal(r.maxAdvanceDays, 0);
   assert.equal(r.lateRefundPercent, 100);
   assert.equal(r.cancelCutoffHours, 0);
-  assert.deepEqual(r.paymentMethods, P.DEFAULT_METHODS);
+  assert.equal('paymentMethods' in r, false); // payment methods were removed: old saved ones are ignored
 });
 
 test('settings check: every problem at once, and only the fields that were sent', () => {
   assert.deepEqual(P.checkSettings({}), { values: {} });
-  const ok = P.checkSettings({ maxAdvanceDays: '30', cancelCutoffHours: 24, lateRefundPercent: '', paymentMethods: 'GCash, maya,  Bank   transfer, gcash' });
-  assert.deepEqual(ok.values, { maxAdvanceDays: 30, cancelCutoffHours: 24, lateRefundPercent: 0, paymentMethods: ['GCash', 'maya', 'Bank transfer'] });
-  const bad = P.checkSettings({ maxAdvanceDays: 400, fullRefundHours: 'two', lateRefundPercent: 50.5, paymentMethods: ' , ', policyNote: 'x'.repeat(501) });
-  assert.equal(bad.problems.length, 5);
+  const ok = P.checkSettings({ maxAdvanceDays: '30', cancelCutoffHours: 24, lateRefundPercent: '', paymentMethods: 'GCash' });
+  assert.deepEqual(ok.values, { maxAdvanceDays: 30, cancelCutoffHours: 24, lateRefundPercent: 0 }); // a payment-methods field is ignored
+  const bad = P.checkSettings({ maxAdvanceDays: 400, fullRefundHours: 'two', lateRefundPercent: 50.5, policyNote: 'x'.repeat(501) });
+  assert.equal(bad.problems.length, 4);
   assert.match(bad.problems.join('\n'), /How far ahead customers can book must be a whole number of days from 0 to 365/);
-  assert.match(bad.problems.join('\n'), /Add at least one payment method/);
   assert.match(bad.problems.join('\n'), /The note for customers can be at most 500 characters/);
 });
 
@@ -82,15 +81,14 @@ test('what customers read', () => {
   const d = P.describe(rules({}));
   assert.deepEqual(d.cancellation.slice(0, 2), ['You can cancel any time before your start time.', 'Paid bookings are refunded in full when you cancel.']);
   assert.deepEqual(d.booking, ['Every booking is confirmed once the facility approves it.']);
-  assert.deepEqual(d.payment, ['Accepted: GCash, Maya, Bank transfer, Card, Other.']);
+  assert.deepEqual(d.payment, ['Pay at the front desk when you arrive.']); // no list of methods, no online payment
   const s = P.describe(rules({ maxAdvanceDays: 30, minNoticeHours: 2, cancelCutoffHours: 24, fullRefundHours: 72, lateRefundPercent: 50, rescheduleCutoffHours: 6,
-    policyNote: 'No-shows are not refunded.', paymentMethods: ['GCash'], paymentInstructions: 'GCash 0917 000 0000 (MAKI)' }));
+    policyNote: 'No-shows are not refunded.' }));
   assert.deepEqual(s.booking.slice(0, 2), ['You can book up to 30 days ahead.', 'Book at least 2 hours before your start time.']);
   assert.equal(s.cancellation[0], 'Cancel up to 1 day before your start time. After that, please contact the facility.');
   assert.equal(s.cancellation[1], 'Full refund if you cancel at least 3 days before your start time; 50% back after that.');
   assert.match(s.cancellation[2], /Move a booking up to 6 hours before/);
   assert.equal(s.cancellation.at(-1), 'No-shows are not refunded.');
-  assert.deepEqual(s.payment, ['Accepted: GCash.', 'GCash 0917 000 0000 (MAKI)']);
   // a cut-off at or after the full-refund time: every allowed cancellation is early enough for a full refund
   assert.equal(P.describe(rules({ cancelCutoffHours: 48, fullRefundHours: 24, lateRefundPercent: 0 })).cancellation[1], 'Paid bookings are refunded in full when you cancel.');
 });

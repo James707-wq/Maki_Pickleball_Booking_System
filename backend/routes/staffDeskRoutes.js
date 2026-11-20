@@ -3,7 +3,7 @@
  *   GET /api/admin/board?for=staff|customers       SF-128 published announcements and staff instructions (read only)
  *   GET /api/admin/activity?q=&date=&page=          SF-135 my own actions (the audit log, for me)
  *   GET /api/admin/day-report?date=&format=csv      SF-131 the day's reservations; SF-133 court usage hour by hour
- *   GET /api/admin/shift-payments?date=&from=&to=&mine=1   SF-132 payments taken during a shift (default: my shift)
+ *   GET /api/admin/shift-payments?date=&from=&to=&mine=1   SF-132 payments taken during a shift (default: my shift), by staff member
  */
 const express = require('express');
 const Announcement = require('../models/Announcement');
@@ -186,21 +186,16 @@ router.get('/shift-payments', authorize('payments'), async (req, res) => {
     if (mineOnly) filter.recordedBy = req.user._id;
     const rows = await Transaction.find(filter).sort({ createdAt: 1 }).populate('recordedBy', 'firstName lastName').populate('user', 'firstName lastName').lean();
 
-    const byMethod = {};
     const byStaff = {};
     const totals = { received: 0, refunded: 0, net: 0, payments: 0, refunds: 0, failed: 0 };
     rows.forEach((t) => {
       const sign = t.type === 'payment' ? 1 : t.type === 'refund' ? -1 : 0;
-      const method = t.method || 'Not recorded';
       const who = nameOf(t.recordedBy) || 'Online (automatic)';
-      byMethod[method] = byMethod[method] || { method, received: 0, refunded: 0, net: 0, count: 0 };
-      byStaff[who] = byStaff[who] || { name: who, received: 0, refunded: 0, net: 0, count: 0 };
-      [byMethod[method], byStaff[who]].forEach((g) => {
-        if (t.type === 'payment') g.received += t.amount;
-        if (t.type === 'refund') g.refunded += t.amount;
-        g.net += sign * t.amount;
-        g.count += 1;
-      });
+      const g = byStaff[who] || (byStaff[who] = { name: who, received: 0, refunded: 0, net: 0, count: 0 });
+      if (t.type === 'payment') g.received += t.amount;
+      if (t.type === 'refund') g.refunded += t.amount;
+      g.net += sign * t.amount;
+      g.count += 1;
       if (t.type === 'payment') { totals.received += t.amount; totals.payments += 1; }
       if (t.type === 'refund') { totals.refunded += t.amount; totals.refunds += 1; }
       if (t.type === 'failed') totals.failed += 1;
@@ -208,8 +203,8 @@ router.get('/shift-payments', authorize('payments'), async (req, res) => {
     totals.net = totals.received - totals.refunded;
     res.json({ success: true, date, from, to, mine: mineOnly,
       shift: shift ? { startTime: shift.startTime, endTime: shift.endTime, note: shift.note || '' } : null,
-      totals, byMethod: Object.values(byMethod).sort((a, b) => b.net - a.net), byStaff: Object.values(byStaff).sort((a, b) => b.net - a.net),
-      transactions: rows.map((t) => ({ _id: t._id, at: t.createdAt, type: t.type, amount: t.amount, method: t.method || '', referenceNumber: t.referenceNumber,
+      totals, byStaff: Object.values(byStaff).sort((a, b) => b.net - a.net),
+      transactions: rows.map((t) => ({ _id: t._id, at: t.createdAt, type: t.type, amount: t.amount, referenceNumber: t.referenceNumber,
         courtName: t.courtName, customer: t.user ? nameOf(t.user) : t.customerName ? `${t.customerName} (walk-in)` : 'Deleted user', note: t.note || '',
         recordedBy: nameOf(t.recordedBy) })) });
   } catch (err) { handleError(res, err); }

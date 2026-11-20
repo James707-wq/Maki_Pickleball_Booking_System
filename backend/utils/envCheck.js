@@ -107,10 +107,6 @@ const KEYS = {
   GOOGLE_PRIVATE_KEY: { service: 'googleCalendar', check: privateKey },
   TURNSTILE_SITE_KEY: { service: 'turnstile', check: turnstileKey },
   TURNSTILE_SECRET_KEY: { service: 'turnstile', check: (v, all) => turnstileKey(v) || (v === all.TURNSTILE_SITE_KEY ? 'is the same as the site key: copy the secret key' : '') },
-  HITPAY_API_KEY: { service: 'hitpay', check: noSpaces },
-  HITPAY_SANDBOX: { service: 'hitpay', check: (v) => (/^(true|false)$/i.test(v) ? '' : 'must be true or false') },
-  HITPAY_WEBHOOK_SALT: { service: 'hitpay', check: noSpaces },
-  HITPAY_API_URL: { service: 'hitpay', check: url },
   RESEND_API_KEY: { service: 'email', check: (v) => (/^re_\S+$/.test(v) ? '' : 'should start with re_') },
   RESEND_API_URL: { service: 'email', check: url },
   EMAIL_FROM: { service: 'email', check: emailFrom },
@@ -121,10 +117,12 @@ const KEYS = {
 };
 const WATCHED = Object.keys(KEYS).filter((k) => KEYS[k].watch !== false);
 const RETIRED = {
-  PAYMONGO_SECRET_KEY: 'PayMongo was replaced by HitPay', PAYMONGO_WEBHOOK_SECRET: 'PayMongo was replaced by HitPay',
+  PAYMONGO_SECRET_KEY: 'Online payment was removed', PAYMONGO_WEBHOOK_SECRET: 'Online payment was removed',
+  HITPAY_API_KEY: 'HitPay online payment was removed', HITPAY_SANDBOX: 'HitPay online payment was removed',
+  HITPAY_WEBHOOK_SALT: 'HitPay online payment was removed', HITPAY_API_URL: 'HitPay online payment was removed',
   SEMAPHORE_API_KEY: 'SMS was removed', SEMAPHORE_SENDER_NAME: 'SMS was removed', SEMAPHORE_API_URL: 'SMS was removed',
 };
-const SERVICES = ['googleSignIn', 'googleCalendar', 'turnstile', 'hitpay', 'email']; // the ones backend/.env sets up
+const SERVICES = ['googleSignIn', 'googleCalendar', 'turnstile', 'email']; // the ones backend/.env sets up
 
 const sentence = (a) => (a.length > 1 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0] || '');
 
@@ -148,7 +146,6 @@ function findProblems(v) {
   if (v.RESEND_API_KEY && !v.EMAIL_FROM && !v.EMAIL_USER) {
     out.push({ key: 'EMAIL_FROM', service: 'email', message: 'Email through Resend needs EMAIL_FROM: an address on the domain you verified with Resend' });
   }
-  if (v.HITPAY_WEBHOOK_SALT && !v.HITPAY_API_KEY) out.push({ key: 'HITPAY_WEBHOOK_SALT', service: 'hitpay', message: 'HITPAY_WEBHOOK_SALT does nothing without HITPAY_API_KEY' });
   return out;
 }
 

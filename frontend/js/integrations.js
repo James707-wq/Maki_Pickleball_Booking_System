@@ -11,7 +11,7 @@
     document.head.appendChild(s);
   });
 
-  /** { googleClientId (staff), customerGoogleClientId, turnstileSiteKey, features: { payOnline, map, weather, addToCalendar } } */
+  /** { googleClientId (staff), customerGoogleClientId, turnstileSiteKey, features: { map, weather, addToCalendar, email, qrCheckin } } */
   function config() {
     if (!configPromise) {
       configPromise = fetch(API + '/integrations/config')

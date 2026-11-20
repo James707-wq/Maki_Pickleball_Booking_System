@@ -767,9 +767,9 @@ router.get('/bookings', authorize('bookings'), async (req, res) => {
     if (req.query.format === 'csv') { // AF-143 export: every booking matching the filters
       const all = await Booking.find(filter).sort({ date: -1, startTime: -1 }).limit(CSV.MAX_ROWS).populate('user', 'firstName lastName email phone').lean();
       return CSV.send(res, `Bookings ${U.todayStr()}`,
-        ['Reference', 'Customer', 'Email', 'Phone', 'Court', 'Date', 'Time', 'Status', 'Reason', 'Payment', 'Paid with', 'Fee (PHP)', 'Discount (PHP)', 'Promo code', 'Booked on'],
+        ['Reference', 'Customer', 'Email', 'Phone', 'Court', 'Date', 'Time', 'Status', 'Reason', 'Payment', 'Fee (PHP)', 'Discount (PHP)', 'Promo code', 'Booked on'],
         all.map((b) => [b.referenceNumber, U.customerName(b), b.user ? b.user.email : '', b.user ? b.user.phone || '' : (b.walkIn && b.walkIn.phone) || '',
-          b.courtName, fmt(b.date), `${b.startTime}-${b.endTime}`, b.status, b.statusReason || '', b.paymentStatus, b.paymentMethod || '', b.totalFee, b.discount || 0, b.promoCode || '', b.createdAt]));
+          b.courtName, fmt(b.date), `${b.startTime}-${b.endTime}`, b.status, b.statusReason || '', b.paymentStatus, b.totalFee, b.discount || 0, b.promoCode || '', b.createdAt]));
     }
 
     const [total, bookings] = await Promise.all([
@@ -811,7 +811,7 @@ router.get('/walk-in/customers', authorize('bookings'), async (req, res) => {
 
 /**
  * POST /api/admin/bookings - a booking made at the desk for a walk-in customer.
- * body: { courtId, date, startTime, customerId | walkIn: { name, phone }, paymentMethod ('' = not paid yet) }
+ * body: { courtId, date, startTime, customerId | walkIn: { name, phone }, paid (true = paid at the desk now) }
  * Confirmed at once (staff made it), without the customer booking rules (how far ahead, notice); the slot being
  * played right now can still be booked. Paid now: recorded like any payment, in Transaction history.
  */
@@ -837,7 +837,8 @@ router.post('/bookings', authorize('bookings'), async (req, res) => {
       if (phone && !/^[0-9+()\-\s]{7,20}$/.test(phone)) return bad(res, 'Enter a valid mobile number, or leave it empty');
       walkIn = { name, phone };
     }
-    const paymentMethod = String(req.body.paymentMethod || '').trim().slice(0, 40);
+    // paid at the desk now? (older callers sent a payment method for this; no method is kept any more)
+    const paidNow = req.body.paid === true || req.body.paid === 'true' || Boolean(String(req.body.paymentMethod || '').trim());
 
     const court = await Court.findById(courtId);
     if (!court) return bad(res, 'Court not found', 404);
@@ -846,7 +847,7 @@ router.post('/bookings', authorize('bookings'), async (req, res) => {
     const now = new Date();
     if (U.endInstant({ date: check.bookingDate, endTime: check.endTime }) <= now) return bad(res, 'That time has already ended. Choose a later time.');
 
-    const paid = Boolean(paymentMethod) && check.totalFee > 0;
+    const paid = paidNow && check.totalFee > 0;
     const booking = await Booking.create({
       user: customer ? customer._id : undefined,
       walkIn: walkIn || undefined,
@@ -857,18 +858,18 @@ router.post('/bookings', authorize('bookings'), async (req, res) => {
       totalFee: check.totalFee,
       status: 'confirmed', statusChangedBy: req.user._id, statusChangedAt: now,
       paymentStatus: paid || check.totalFee === 0 ? 'paid' : 'pending',
-      ...(paid ? { paymentMethod, paidAt: now, verifiedBy: req.user._id, verifiedAt: now } : {}),
+      ...(paid ? { paidAt: now, verifiedBy: req.user._id, verifiedAt: now } : {}),
     });
     // the court's schedule must not have changed since the slot was checked (another booking, a block, new hours)
     await U.commitScheduleOrUndo(court, () => Booking.deleteOne({ _id: booking._id }));
-    if (paid) await logTransaction(booking, 'payment', { method: paymentMethod, note: 'Paid at the desk', by: req.user._id });
+    if (paid) await logTransaction(booking, 'payment', { note: 'Paid at the desk', by: req.user._id });
 
     const who = customer ? `${customer.firstName} ${customer.lastName}`.trim() : `${walkIn.name} (walk-in)`;
     if (customer) {
-      await U.notify(customer._id, `Booking ${booking.referenceNumber} was made for you at the facility: ${court.name} on ${date} at ${startTime}. It is confirmed.${paid ? ` Paid with ${paymentMethod}.` : ''}`,
+      await U.notify(customer._id, `Booking ${booking.referenceNumber} was made for you at the facility: ${court.name} on ${date} at ${startTime}. It is confirmed.${paid ? ' Paid at the desk.' : ''}`,
         { subject: `Confirmed: ${court.name}, ${date} ${startTime}`, booking, attachIcs: true });
     }
-    res.locals.auditDetail = `Walk-in booking ${booking.referenceNumber} for ${who}: ${court.name}, ${date} ${startTime}-${check.endTime}${paid ? `, paid with ${paymentMethod}` : ', not paid yet'}`;
+    res.locals.auditDetail = `Walk-in booking ${booking.referenceNumber} for ${who}: ${court.name}, ${date} ${startTime}-${check.endTime}${paid ? ', paid at the desk' : ', not paid yet'}`;
     res.status(201).json({ success: true, booking: await withRefs(Booking.findById(booking._id)) });
   } catch (err) {
     handleError(res, err);
@@ -1099,14 +1100,13 @@ router.patch('/bookings/:id/payment', authorize('payments'), async (req, res) =>
     if (booking.paymentStatus === paymentStatus) return bad(res, `Payment is already ${paymentStatus}`);
 
     booking.paymentStatus = paymentStatus;
-    if (paymentStatus === 'refunded' && !booking.refund?.at) booking.refund = { amount: booking.totalFee, reason: 'Marked refunded', method: booking.paymentMethod, at: new Date(), by: req.user._id };
-    if (req.body.paymentMethod !== undefined) booking.paymentMethod = String(req.body.paymentMethod).trim().slice(0, 40);
+    if (paymentStatus === 'refunded' && !booking.refund?.at) booking.refund = { amount: booking.totalFee, reason: 'Marked refunded', at: new Date(), by: req.user._id };
     booking.paidAt = paymentStatus === 'paid' ? new Date() : paymentStatus === 'pending' ? undefined : booking.paidAt;
     await booking.save();
         // AF-123: keep the transaction history in step with manual payment changes
     if (['paid', 'refunded', 'failed'].includes(paymentStatus)) {
       await logTransaction(booking, paymentStatus === 'paid' ? 'payment' : paymentStatus === 'refunded' ? 'refund' : 'failed',
-        { method: booking.paymentMethod, by: req.user._id, note: 'Manual update' });
+        { by: req.user._id, note: 'Manual update' });
     }
 
     const ref = booking.referenceNumber;
@@ -1124,7 +1124,7 @@ router.patch('/bookings/:id/payment', authorize('payments'), async (req, res) =>
 });
 
 // AF-121 .. AF-135
-router.use(require('./integrationRoutes')); // Google Calendar, HitPay, weather; on/off needs PIN + one-time code
+router.use(require('./integrationRoutes')); // Google Calendar, weather, custom API; on/off needs PIN + one-time code
 router.use(require('./securityRoutes'));    // the admin's security PIN
 router.use(require('./apiTokenAdminRoutes')); // API tokens for other systems (/api/v1)
 router.use(require('./sessionAdminRoutes'));  // AF-141 who is signed in; end sessions

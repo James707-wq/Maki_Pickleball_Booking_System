@@ -20,11 +20,11 @@ const googleClientIds = () => ({
   customer: env('CUSTOM_GOOGLE_CLIENT_ID') || env('GOOGLE_CLIENT_ID'),
 });
 
-const NAMES = ['googleSignIn', 'googleCalendar', 'turnstile', 'hitpay', 'maps', 'weather', 'email', 'qrCheckin', 'webhook'];
+const NAMES = ['googleSignIn', 'googleCalendar', 'turnstile', 'maps', 'weather', 'email', 'qrCheckin', 'webhook'];
 /** Names people see (security codes, alert emails). Keep in step with INTEGRATIONS in frontend/js/admin.js. */
 const LABELS = {
   googleSignIn: 'Google Sign-In', googleCalendar: 'Google Calendar', turnstile: 'Cloudflare Turnstile',
-  hitpay: 'HitPay', maps: 'Map', weather: 'Weather', email: 'Email', qrCheckin: 'QR check-in',
+  maps: 'Map', weather: 'Weather', email: 'Email', qrCheckin: 'QR check-in',
   webhook: 'Custom API (webhook)',
 };
 
@@ -36,7 +36,6 @@ const configured = {
   googleSignIn: () => Boolean(env('GOOGLE_CLIENT_ID') || env('CUSTOM_GOOGLE_CLIENT_ID')),
   googleCalendar: () => Boolean(env('GOOGLE_CALENDAR_ID') && env('GOOGLE_SERVICE_ACCOUNT_EMAIL') && env('GOOGLE_PRIVATE_KEY')),
   turnstile: () => Boolean(env('TURNSTILE_SITE_KEY') && env('TURNSTILE_SECRET_KEY')),
-  hitpay: () => Boolean(env('HITPAY_API_KEY')),
   maps: () => true,    // Leaflet + OpenStreetMap: no key needed
   weather: () => true, // Open-Meteo: no key needed
   email: () => Boolean(env('RESEND_API_KEY') || (env('EMAIL_HOST') && env('EMAIL_USER') && env('EMAIL_PASS'))),
@@ -44,9 +43,6 @@ const configured = {
   // an address and a readable signing secret saved under admin -> Integrations (filled in by switches())
   webhook: () => Boolean(cache.webhook && cache.webhook.url && cache.webhook.secretOk),
 };
-const hitpayWebhookConfigured = () => configured.hitpay() && Boolean(env('HITPAY_WEBHOOK_SALT'));
-/** HitPay sandbox (test payments) unless HITPAY_SANDBOX=false, which needs live keys. */
-const hitpaySandbox = () => env('HITPAY_SANDBOX').toLowerCase() !== 'false';
 
 async function switches() {
   if (cache.switches && Date.now() - cache.at < CACHE_MS) return cache.switches;
@@ -110,8 +106,6 @@ async function status() {
     const c = configured[n]();
     out[n] = { configured: c, switchedOn: sw[n] !== false, active: c && sw[n] !== false };
   }
-  out.hitpay.webhook = hitpayWebhookConfigured();
-  out.hitpay.sandbox = hitpaySandbox();
   // which Google client each sign-in page uses (the admin Integrations page explains it)
   out.googleSignIn.staffClient = Boolean(env('GOOGLE_CLIENT_ID'));
   out.googleSignIn.customerClient = env('CUSTOM_GOOGLE_CLIENT_ID') ? 'own' : env('GOOGLE_CLIENT_ID') ? 'shared' : 'none';
@@ -127,7 +121,6 @@ async function publicConfig() {
     turnstileSiteKey: (await isActive('turnstile')) ? env('TURNSTILE_SITE_KEY') : '',
     // read-only flags so customer pages know what to show; changing them is admin-only
     features: {
-      payOnline: await isActive('hitpay'),
       map: await isActive('maps'),
       weather: await isActive('weather'),
       addToCalendar: await isActive('googleCalendar'),
@@ -139,5 +132,5 @@ async function publicConfig() {
 
 module.exports = {
   env, NAMES, LABELS, configured, isActive, status, publicConfig, forgetSwitches, webhookSettings, googleClientIds,
-  defaultSwitches, planReset, hitpayWebhookConfigured, hitpaySandbox,
+  defaultSwitches, planReset,
 };

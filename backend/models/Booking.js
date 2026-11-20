@@ -64,17 +64,6 @@ const BookingSchema = new mongoose.Schema(
     reminderSentAt: { type: Date },
     // Google Calendar event mirroring this booking (set while it is confirmed/completed)
     calendarEventId: { type: String },
-    // HitPay payment link (payment request) for the customer: GCash, QR Ph, cards, GrabPay, ShopeePay...
-    hitpay: {
-      requestId: { type: String },
-      checkoutUrl: { type: String },
-      reference: { type: String },
-      amount: { type: Number },
-      createdAt: { type: Date },
-      checkedAt: { type: Date },            // last time the customer's page asked HitPay (rate limit)
-      shortNotified: { type: Boolean },     // staff already told the link paid less than the fee
-      previousRequestIds: [{ type: String }], // replaced links, still matched by the webhook
-    },
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'],

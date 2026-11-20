@@ -43,8 +43,7 @@ const allowedOrigins = new Set(
 app.use(cors({
   origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)),
 }));
-// keep the raw body too: the HitPay webhook signature is computed over the exact bytes
-app.use(express.json({ limit: '1mb', verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); } }));
+app.use(express.json({ limit: '1mb' }));
 
 // Behind a proxy or load balancer (TRUST_PROXY=1), req.ip is the visitor's address instead of the proxy's
 app.set('trust proxy', rateLimits.trustProxySetting(process.env.TRUST_PROXY));
@@ -71,7 +70,7 @@ app.use('/api/courts', courtRoutes);        // UF-109..115
 app.use('/api/bookings', bookingRoutes);    // UF-116..122
 app.use('/api/admin', adminRoutes);
 app.use('/api/v1', require('./routes/apiV1Routes')); // the API for other systems, with an API token (before the /api routers below)
-app.use('/api', require('./routes/publicIntegrationRoutes')); // login-page config + HitPay webhook (no login)
+app.use('/api', require('./routes/publicIntegrationRoutes')); // login-page config, map and weather (no login)
 app.use('/api', engageRoutes);              // UF-130, UF-131, UF-133, UF-134         // AF-102, AF-105..AF-135
 
 const PORT = process.env.PORT || 5000;

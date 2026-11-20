@@ -21,8 +21,8 @@ test('a reset turns back on only the switches that are off', () => {
 
 test('a service that is not set up is still switched back on (its keys decide whether it runs)', () => {
   const now = allSwitches(true);
-  now.hitpay = { configured: false, switchedOn: false, active: false };
-  assert.deepEqual(planReset(now).switches, { hitpay: true });
+  now.googleCalendar = { configured: false, switchedOn: false, active: false };
+  assert.deepEqual(planReset(now).switches, { googleCalendar: true });
 });
 
 test('nothing to reset when every switch is already on', () => {

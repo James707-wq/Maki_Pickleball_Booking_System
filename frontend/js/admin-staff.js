@@ -257,7 +257,7 @@ const spUi = { ...SP_DEFAULTS };
 
 async function renderShiftPay(params) {
   const go = bindState(spUi, SP_DEFAULTS, params); // #/shiftpay?from=08:00&to=16:00&mine=1
-  setHead('Shift payments', 'What was taken during a shift, by payment method. Print it for the handover.', '<button class="btn" id="spPrint" type="button">Print</button>');
+  setHead('Shift payments', 'What was taken during a shift, by staff member. Print it for the handover.', '<button class="btn" id="spPrint" type="button">Print</button>');
   $('#spPrint').onclick = () => { document.body.classList.remove('print-receipt'); window.print(); };
   view.innerHTML = `<div class="bar">
       <input type="date" id="spDate" value="${esc(spUi.date || todayStr())}" aria-label="Day" />
@@ -279,16 +279,14 @@ async function renderShiftPay(params) {
           <div><div class="k">Received</div><div class="v num">${peso(d.totals.received)}</div><div class="s">${plural(d.totals.payments, 'payment')}</div></div>
           <div><div class="k">Refunded</div><div class="v num">${peso(d.totals.refunded)}</div><div class="s">${plural(d.totals.refunds, 'refund')}</div></div>
           <div><div class="k">Net</div><div class="v num">${peso(d.totals.net)}</div><div class="s">${d.totals.failed ? `${plural(d.totals.failed, 'failed payment')} (no money)` : 'received minus refunded'}</div></div></div></div>
-      <div class="grid2 even">
-        <div class="card"><div class="pad"><h3>By payment method</h3>${groupList(d.byMethod, 'method')}<p class="muted" style="margin-bottom:0;">The Cash line is what should be in the drawer (after refunds).</p></div></div>
-        <div class="card"><div class="pad"><h3>By staff member</h3>${groupList(d.byStaff, 'name')}</div></div></div>
+      <div class="card mb"><div class="pad"><h3>By staff member</h3>${groupList(d.byStaff, 'name')}</div></div>
       <div class="card"><div class="tablewrap"><table>
-        <thead><tr><th>Time</th><th>Booking</th><th>Customer</th><th>Type</th><th>Method</th><th class="r">Amount</th><th>Recorded by</th></tr></thead>
+        <thead><tr><th>Time</th><th>Booking</th><th>Customer</th><th>Type</th><th class="r">Amount</th><th>Recorded by</th></tr></thead>
         <tbody>${d.transactions.length ? d.transactions.map((x) => `<tr><td class="num">${esc(new Date(x.at).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' }))}</td>
           <td class="num"><b>${esc(x.referenceNumber)}</b><span class="sub">${esc(x.courtName)}</span></td><td>${esc(x.customer)}</td>
           <td>${pillX(`t-${x.type}`, { payment: 'Payment', refund: 'Refund', failed: 'Failed' }[x.type])}${x.note ? `<span class="sub">${esc(x.note)}</span>` : ''}</td>
-          <td>${esc(x.method || '-')}</td><td class="r num ${x.type === 'refund' ? 'neg' : ''}">${x.type === 'refund' ? '−' : ''}${peso(x.amount)}</td><td>${esc(x.recordedBy || 'Online (automatic)')}</td></tr>`).join('')
-          : emptyRow(7, 'No payments or refunds in this time.')}</tbody></table></div></div>`;
+          <td class="r num ${x.type === 'refund' ? 'neg' : ''}">${x.type === 'refund' ? '−' : ''}${peso(x.amount)}</td><td>${esc(x.recordedBy || 'Online (automatic)')}</td></tr>`).join('')
+          : emptyRow(6, 'No payments or refunds in this time.')}</tbody></table></div></div>`;
   }
   refreshView = () => load().catch((e) => toast(e.message, true));
   refreshView();
@@ -438,16 +436,16 @@ const GUIDES = [
   { perm: 'bookings', title: 'Find a booking', steps: ['Bookings: type a reference, a name (first, last or full), an email, a mobile number or a payment reference. A date like 2026-11-20 finds that day.',
     'Narrow it down with status, payment, court, date and <b>time</b>: morning, afternoon, evening, or who is playing at a given hour.'] },
   { perm: 'bookings', title: 'Book a walk-in customer', steps: ['Press <b>Walk-in booking</b> on the Dashboard or Bookings.', 'Choose a guest (name and mobile) or find a customer\'s account.',
-    'Pick the court, day and start time. Only open slots are listed.', 'If they pay now, choose how. The receipt opens by itself so you can print it.'] },
+    'Pick the court, day and start time. Only open slots are listed.', 'If they pay now, tick <b>Paid now at the desk</b>. The receipt opens by itself so you can print it.'] },
   { perm: 'checkins', title: 'Check a customer in and out', steps: ['Press <b>Verify booking</b> (Dashboard or Check-ins), then scan their QR code or type the reference (MKI-...).',
     'Green: good to play now. Amber: valid, but not now. Red: do not let them play.', 'Press <b>Check in now</b>. When they leave, open the booking and press <b>Check out</b>.'] },
   { perm: 'bookings', title: 'Move a booking to another time or court', steps: ['Open the booking. <b>Reschedule...</b> changes the day, time or court.',
     '<b>Assign court...</b> keeps the time and the fee and only changes the court, even while they are playing.', 'The customer is told either way.'] },
-  { perm: 'payments', title: 'Take a payment and print a receipt', steps: ['Open the booking, choose the method under Payment and press <b>Mark paid</b>.',
-    'Press <b>Receipt</b>, then <b>Print receipt</b>. Only the receipt prints.', 'GCash or bank references customers sent wait under Payments -> <b>Verification</b>.'] },
+  { perm: 'payments', title: 'Take a payment and print a receipt', steps: ['Open the booking and press <b>Mark paid</b> under Payment.',
+    'Press <b>Receipt</b>, then <b>Print receipt</b>. Only the receipt prints.'] },
   { perm: 'payments', title: 'Refund a customer', steps: ['Payments -> <b>Refunds</b> lists paid bookings that were cancelled, with what the cancellation policy says to give back.',
-    'Record the amount, how it was returned and why. The customer is told.'] },
-  { perm: 'payments', title: 'End of shift: count the payments', steps: ['Payments -> <b>Shift payments</b> shows what was taken during your shift, by method. The Cash line is what should be in the drawer.',
+    'Record the amount and why. The customer is told.'] },
+  { perm: 'payments', title: 'End of shift: count the payments', steps: ['Payments -> <b>Shift payments</b> shows what was taken during your shift: received, refunded and net, by staff member.',
     'Tick <b>Only what I recorded</b> for just your payments, then <b>Print</b> for the handover.'] },
   { perm: 'maintenance.report', title: 'Report broken equipment or a court problem', steps: ['Courts -> Maintenance -> <b>Report a problem</b>. Mark it urgent if it is not safe to play.',
     'You can also set the court to maintenance so customers can\'t book it. You are told when it is fixed.'] },

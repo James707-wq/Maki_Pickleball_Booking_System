@@ -131,7 +131,6 @@ function bookingData(b, user, includeContact) {
     promoCode: b.promoCode || '',
     currency: 'PHP',
     paymentStatus: b.paymentStatus,
-    paymentMethod: b.paymentMethod || '',
     paidAt: iso(b.paidAt),
     checkedInAt: iso(b.checkedInAt),
     customer,

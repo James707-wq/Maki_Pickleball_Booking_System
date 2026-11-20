@@ -77,7 +77,7 @@
             <div class="receipt-row"><span>Time</span><span>${esc(b.startTime)}–${esc(b.endTime)}</span></div>
             <div class="receipt-row"><span>Booking Status</span><span>${esc(STATUS[b.status] || b.status)}</span></div>
             <div class="receipt-row"><span>Payment Status</span><span style="font-weight:600;color:${payTone};">${esc(PAY[b.paymentStatus] || b.paymentStatus)}</span></div>
-            ${hasReceipt && b.paidAt ? `<div class="receipt-row"><span>Paid on</span><span>${fmtDate(b.paidAt)}${b.paymentMethod ? ' · ' + esc(b.paymentMethod) : ''}</span></div>` : ''}
+            ${hasReceipt && b.paidAt ? `<div class="receipt-row"><span>Paid on</span><span>${fmtDate(b.paidAt)}</span></div>` : ''}
             ${b.promoCode ? `<div class="receipt-row"><span>Promo ${esc(b.promoCode)}</span><span style="color:#14633c;">−₱${esc(b.discount)}</span></div>` : ''}
             <div class="receipt-row total"><span>${hasReceipt ? 'Total Paid' : 'Total Fee'}</span><span>₱${esc(b.totalFee)}</span></div>
           </div>
@@ -85,7 +85,6 @@
             ['cancelled', 'rejected'].includes(b.status) ? 'No receipt is issued for this booking.'
               : 'Your receipt will be available here once the facility approves your booking and your payment is verified.'}</p>`}
 
-          <div id="payReturnMsg" class="msg no-print" role="status"></div>
           <div id="paySection" class="no-print"></div>
           <div id="qrSection" class="qr-card" hidden></div>
           <div id="calSection" class="no-print cal-section" hidden></div>
@@ -98,11 +97,9 @@
           </div>
         `;
         renderPayment(b);
-        renderPayOnline(b);
         renderAddToCalendar(b);
         renderCheckinQr(b);
         renderReview(b);
-        checkOnlinePayment(b);
         // a little celebration the first time you land on a new booking
         if (['pending', 'confirmed'].includes(b.status) && !sessionStorage.getItem('cele-' + b._id)) {
           sessionStorage.setItem('cele-' + b._id, '1');
@@ -111,35 +108,6 @@
       } catch (err) {
         el.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
       }
-    }
-
-    // Pay online with HitPay (GCash, QR Ph, card and more): reuse the facility's link or start a new one
-    async function renderPayOnline(b) {
-      const slot = document.getElementById('payOnline');
-      if (!slot) return;
-      const cfg = await Integrations.config();
-      const linkOk = b.hitpay && b.hitpay.amount === b.totalFee && /^https:\/\//.test(b.hitpay.checkoutUrl || '');
-      if (!cfg.features.payOnline || !(b.totalFee > 0)) {
-        // switched off (or nothing to pay): only a link staff already sent can be used
-        if (!linkOk) return;
-      }
-      slot.innerHTML = `
-        <button type="button" class="cta" id="payOnlineBtn" style="margin-top:16px;width:100%;">Pay online now · ₱${esc(b.totalFee)}</button>
-        <p style="font-size:.8rem;color:var(--muted);margin:6px 0 0;">GCash, QR Ph, card and more on HitPay's secure checkout. You come back here after paying.</p>
-        <div id="payOnlineMsg" class="msg" role="alert"></div>`;
-      document.getElementById('payOnlineBtn').onclick = async (e) => {
-        const btn = e.currentTarget;
-        btn.disabled = true; btn.textContent = 'Opening secure checkout…';
-        try {
-          const url = linkOk ? b.hitpay.checkoutUrl
-            : (await apiRequest(`/bookings/${b._id}/pay-online`, { method: 'POST', auth: true })).checkoutUrl;
-          if (!/^https:\/\//.test(url || '')) throw new Error('Online payment is not available right now.');
-          window.location.href = url;
-        } catch (err) {
-          btn.disabled = false; btn.textContent = `Pay online now · ₱${b.totalFee}`;
-          showMsg(document.getElementById('payOnlineMsg'), err.message);
-        }
-      };
     }
 
     // QR code to show at the front desk (confirmed bookings, when QR check-in is switched on)
@@ -184,55 +152,21 @@
       }
     }
 
-    // AF-136 payment settings: the methods the facility accepts and how to pay (admin -> Hours & rules)
-    let PAY = null;
-    let payShownFor = null;
-    Integrations.facility().then((f) => {
-      PAY = (f && f.rules) || null;
-      if (payShownFor && document.getElementById('payForm')) renderPayment(payShownFor);
-    });
-
-    // UF-121 / AF-121: tell the facility how you paid so staff can verify it
+    // UF-121: customers pay at the front desk (no payment method to choose, no online payment).
+    // A reference sent before that change still shows while staff check it.
     function renderPayment(b) {
-      payShownFor = b;
       const box = document.getElementById('paySection');
       if (['cancelled', 'rejected'].includes(b.status) || b.paymentStatus === 'refunded') { box.innerHTML = ''; return; }
       if (b.paymentStatus === 'paid') { box.innerHTML = '<p style="font-size:.85rem;color:#14633c;margin-top:12px;">✅ Payment received. Thank you!</p>'; return; }
-      // HitPay link (sent by the facility, or started with "Pay online now"): GCash, QR Ph, card and more on HitPay's page
-      // only offer a link that matches the current fee (the fee can change after a reschedule)
-      const payOnline = '<div id="payOnline"></div>'; // filled by renderPayOnline() when online payment is on
       if (b.paymentStatus === 'pending' && b.paymentSubmittedAt) {
-        box.innerHTML = payOnline + `<p style="font-size:.85rem;color:var(--muted);margin-top:12px;">🕓 We received your ${esc(b.paymentMethod)} reference <b>${esc(b.paymentReference)}</b>. Staff will verify it shortly.</p>`;
+        box.innerHTML = `<p style="font-size:.85rem;color:var(--muted);margin-top:12px;">🕓 We received your payment reference <b>${esc(b.paymentReference)}</b>. Staff will check it shortly.</p>`;
         return;
       }
-      box.innerHTML = payOnline + `
-        <form id="payForm" class="receipt" style="margin-top:16px;">
-          <strong>Already paid? Send us the details</strong>
-          ${b.paymentStatus === 'failed' ? `<p class="msg error" style="display:block;">Your last payment could not be verified${b.paymentNote ? ': ' + esc(b.paymentNote) : ''}. Please check and send it again.</p>` : '<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0;">You can also just pay at the facility before your time.</p>'}
-          ${PAY && PAY.paymentInstructions ? `<p class="pay-instructions">${esc(PAY.paymentInstructions)}</p>` : ''}
-          <label for="payMethod">Paid with</label>
-          <select id="payMethod" required><option value="">Choose…</option>${((PAY && PAY.paymentMethods) || ['GCash', 'Maya', 'Bank transfer', 'Card', 'Other']).map((m) => `<option>${esc(m)}</option>`).join('')}</select>
-          <label for="payRef">Reference number</label>
-          <input id="payRef" maxlength="60" placeholder="e.g. GCash ref no." required />
-          <button type="submit" class="cta" style="margin-top:12px;">Send payment details</button>
-          <div id="payMsg" class="msg"></div>
-        </form>`;
-      document.getElementById('payForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const msg = document.getElementById('payMsg');
-        try {
-          const r = await apiRequest(`/bookings/${bookingId}/payment-proof`, { method: 'POST', auth: true, version: b.writeTS, body: { method: document.getElementById('payMethod').value, reference: document.getElementById('payRef').value } });
-          renderPayment(r.booking);
-        } catch (err) {
-          if (err.code === 'WRITE_CONFLICT') {
-            await loadBooking(); // show the booking as it is now
-            const fresh = document.getElementById('payMsg');
-            if (fresh) showMsg(fresh, err.message); else alert(err.message);
-            return;
-          }
-          showMsg(msg, err.message);
-        }
-      });
+      box.innerHTML = `<div class="receipt" style="margin-top:16px;">
+          <strong>How to pay</strong>
+          ${b.paymentStatus === 'failed' ? `<p class="msg error" style="display:block;">Your last payment could not be verified${b.paymentNote ? ': ' + esc(b.paymentNote) : ''}.</p>` : ''}
+          <p style="font-size:.88rem;margin:6px 0 0;">Pay at the front desk when you arrive. Show your booking reference <b>${esc(b.referenceNumber)}</b>.</p>
+        </div>`;
     }
 
     // Rating lives on its own page now
@@ -241,26 +175,6 @@
       box.innerHTML = b.status === 'completed'
         ? `<div class="receipt" style="margin-top:16px;"><strong>How was your game?</strong><p style="margin:6px 0 0;"><a href="feedback.html?booking=${encodeURIComponent(b._id)}">Rate this visit in Feedback &amp; Ratings</a></p></div>`
         : '';
-    }
-
-    // Back from HitPay's checkout? HitPay adds ?reference=<payment link>&status=... to this page's address.
-    // Those are never trusted: the server asks HitPay itself. Tidy the address so a reload looks normal.
-    const backFromCheckout = /[?&](reference|status)=/.test(window.location.search);
-    if (backFromCheckout) history.replaceState(null, '', `booking-confirmation.html?id=${encodeURIComponent(bookingId)}`);
-
-    // An unpaid HitPay link: ask whether it was paid (works without the webhook, e.g. on localhost)
-    let paymentChecked = false;
-    async function checkOnlinePayment(b) {
-      if (paymentChecked || !b.hitpay || !b.hitpay.requestId || b.paymentStatus === 'paid' || ['cancelled', 'rejected'].includes(b.status)) return;
-      paymentChecked = true;
-      let paid = false;
-      try { paid = (await apiRequest(`/bookings/${b._id}/pay-online/check`, { method: 'POST', auth: true })).paid; } catch (e) { /* staff can still check it */ }
-      if (paid) {
-        await loadBooking();
-        showMsg(document.getElementById('payReturnMsg'), 'Your online payment went through.', 'success');
-      } else if (backFromCheckout) {
-        showMsg(document.getElementById('payReturnMsg'), "We haven't received your online payment yet. If you just paid, it can take a minute: reload this page shortly.", 'note');
-      }
     }
 
     loadBooking();

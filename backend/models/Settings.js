@@ -38,7 +38,6 @@ const SettingsSchema = new mongoose.Schema(
       googleSignIn: { type: Boolean, default: true },
       googleCalendar: { type: Boolean, default: true },
       turnstile: { type: Boolean, default: true },
-      hitpay: { type: Boolean, default: true },
       maps: { type: Boolean, default: true },
       weather: { type: Boolean, default: true },
       email: { type: Boolean, default: true },

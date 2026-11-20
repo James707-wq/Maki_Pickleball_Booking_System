@@ -274,7 +274,7 @@ const NAV = [
     { label: 'Revenue analytics', route: 'analytics', href: '#/analytics?tab=revenue', q: { tab: 'revenue' }, perm: 'analytics', title: 'Revenue Analytics', kw: 'income money earnings sales' },
     { label: 'User analytics', route: 'analytics', href: '#/analytics?tab=users', q: { tab: 'users' }, perm: 'analytics', title: 'User Analytics', kw: 'customers signups registered active repeat' },
   ] },
-  { label: 'Integrations', icon: 'integrations', route: 'integrations', perm: 'settings', title: 'Integrations and API settings', kw: 'api google sign in calendar hitpay gcash qrph qr ph card grabpay shopeepay turnstile captcha map weather on off switch keys pin otp code two-step 2fa' },
+  { label: 'Integrations', icon: 'integrations', route: 'integrations', perm: 'settings', title: 'Integrations and API settings', kw: 'api google sign in calendar turnstile captcha map weather on off switch keys pin otp code two-step 2fa' },
   { group: 'security', label: 'Security', icon: 'logins', children: [
     { label: 'Login security', route: 'logins', perm: 'logins', title: 'Login history and account lockouts', kw: 'login sign in signed who failed password attempts locked lockout unlock ip suspicious brute force' },
     { label: 'Active sessions', route: 'sessions', perm: 'sessions', title: 'Session Management', kw: 'sessions signed in logged in online devices end sign out log out kick force logout terminate' },
@@ -741,7 +741,6 @@ function todayCard(t) {
    who comes to the facility. Confirmed at once; the customer booking rules
    don't apply. A guest needs no account.
    ===================================================================== */
-const PAY_NOW = ['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'];
 
 async function walkInDialog(prefill = {}) {
   let courts = [];
@@ -770,7 +769,7 @@ async function walkInDialog(prefill = {}) {
         ${field('Find the customer', '<input id="wiSearch" type="search" autocomplete="off" placeholder="Name, email or mobile" />')}
         <div id="wiResults" class="wi-results" aria-live="polite"></div>
       </div>
-      ${field('Payment', `<select name="paymentMethod"><option value="">Not paid yet (pay later)</option>${PAY_NOW.map((m) => `<option value="${esc(m)}">Paid now: ${esc(m)}</option>`).join('')}</select>`)}
+      <label class="check"><input type="checkbox" name="paidNow" /><span><b>Paid now at the desk</b>Leave it unticked if they pay later. The receipt opens right after booking.</span></label>
       <div class="msg error hidden" role="alert"></div>
       <div class="dlg-foot"><button type="button" class="btn" data-close>Cancel</button><button type="submit" class="btn primary">Make booking</button></div>
     </form>`, { wide: true });
@@ -837,7 +836,7 @@ async function walkInDialog(prefill = {}) {
 
   onSubmit($('#wiForm'), async (d) => {
     if (!d.startTime) throw new Error('Choose a free time.');
-    const body = { courtId: d.courtId, date: d.date, startTime: d.startTime, paymentMethod: d.paymentMethod };
+    const body = { courtId: d.courtId, date: d.date, startTime: d.startTime, paid: Boolean(d.paidNow) };
     if (whoNow() === 'account') {
       if (!st.customer) throw new Error('Find and choose the customer, or book them as a walk-in guest.');
       body.customerId = st.customer.id;
@@ -893,7 +892,6 @@ function showBooking(b) {
     if (ps === 'paid') payActions += '<button class="btn small danger" data-act="pay" data-pay="refunded">Refund</button>';
     if (['paid', 'failed', 'refunded'].includes(ps)) payActions += '<button class="btn small" data-act="pay" data-pay="pending">Reset to unpaid</button>';
   }
-  const methods = ['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'];
 
   openModal(`Booking ${b.referenceNumber}`, `
     <dl class="kv">
@@ -904,7 +902,7 @@ function showBooking(b) {
       <dt>Date and time</dt><dd class="num">${fmtDate(b.date)}, ${esc(b.startTime)}–${esc(b.endTime)}</dd>
       <dt>Fee</dt><dd class="num">${peso(b.totalFee)}</dd>
       <dt>Booking status</dt><dd>${pillS(st)}${b.statusReason ? `<div class="muted" style="margin-top:4px;">Reason: ${esc(b.statusReason)}</div>` : ''}</dd>
-      <dt>Payment</dt><dd>${pillP(b.paymentStatus)}${b.paymentMethod ? ` <span class="muted">via ${esc(b.paymentMethod)}</span>` : ''}${b.paidAt ? `<span class="muted"> on ${esc(fmtStamp(b.paidAt))}</span>` : ''}</dd>
+      <dt>Payment</dt><dd>${pillP(b.paymentStatus)}${b.paidAt ? `<span class="muted"> on ${esc(fmtStamp(b.paidAt))}</span>` : ''}</dd>
       ${b.promoCode ? `<dt>Promo</dt><dd>${esc(b.promoCode)} <span class="muted">(−${peso(b.discount)})</span></dd>` : ''}
       ${b.paymentReference ? `<dt>Payment ref</dt><dd class="num">${esc(b.paymentReference)}${b.paymentStatus === 'pending' ? ' <span class="muted">awaiting verification</span>' : ''}${b.paymentNote ? `<div class="muted">Rejected: ${esc(b.paymentNote)}</div>` : ''}</dd>` : ''}
       ${b.refund && b.refund.at ? `<dt>Refund</dt><dd class="num">${peso(b.refund.amount)} <span class="muted">${esc(b.refund.reason || '')}</span></dd>` : ''}
@@ -934,15 +932,7 @@ function showBooking(b) {
 
     ${payActions ? `<div class="section"><h3>Payment</h3>
       <div class="payrow">
-        <label class="f" style="margin:0;">Method<select id="payMethod">${optionList(methods.map((m) => [m, m]), b.paymentMethod || 'Cash')}</select></label>
         <div class="btnrow">${payActions}</div></div></div>` : ''}
-
-    ${canP && !['cancelled', 'rejected'].includes(st) && (['pending', 'failed'].includes(b.paymentStatus) || (b.hitpay && b.hitpay.requestId)) ? `<div class="section"><h3>Online payment (HitPay)</h3>
-      ${b.hitpay && b.hitpay.checkoutUrl ? `<p class="muted" style="margin:0 0 8px;">Link sent ${esc(fmtStamp(b.hitpay.createdAt))}: <a href="${esc(b.hitpay.checkoutUrl)}" target="_blank" rel="noopener">${esc(b.hitpay.checkoutUrl)}</a></p>` : '<p class="muted" style="margin:0 0 8px;">Send the customer a link to pay by GCash, QR Ph, card and more.</p>'}
-      <div class="btnrow">
-        ${['pending', 'failed'].includes(b.paymentStatus) ? `<button class="btn small" data-act="hpLink">${!(b.hitpay && b.hitpay.requestId) ? 'Send payment link' : b.hitpay.amount !== b.totalFee ? `Send new link for ${peso(b.totalFee)}` : 'Resend link'}</button>` : ''}
-        ${b.hitpay && b.hitpay.requestId && ['pending', 'failed'].includes(b.paymentStatus) ? '<button class="btn small primary" data-act="hpCheck">Check payment</button>' : ''}
-      </div></div>` : ''}
 
     <div id="bkErr" class="msg error hidden" role="alert"></div>`);
 
@@ -1011,24 +1001,9 @@ function showBooking(b) {
       if (!time) return err('Pick an open time slot.');
       const r = await send('/reschedule', { courtId: $('#rsCourt').value, date: $('#rsDate').value, startTime: time }, 'Booking moved');
       if (r && r.feeChanged) toast(`Moved. The fee changed to ${peso(r.booking.totalFee)}${r.booking.paymentStatus === 'paid' ? ' - check the payment' : ''}.`);
-    } else if (act === 'hpLink' || act === 'hpCheck') {
-      $('#bkErr').className = 'msg error hidden';
-      btn.disabled = true;
-      try {
-        if (act === 'hpLink') {
-          await api(`/bookings/${b._id}/hitpay-link`, { method: 'POST', body: {} });
-          toast('Payment link sent to the customer');
-        } else {
-          const r = await api(`/bookings/${b._id}/hitpay-check`, { method: 'POST', body: {} });
-          toast(r.paid ? 'Paid via HitPay - payment recorded' : (r.message || 'Not paid yet'), Boolean(r.message));
-          if (r.paid) changed();
-        }
-        showBooking((await api(`/bookings/${b._id}`)).booking);
-      } catch (ex) { err(ex.message); btn.disabled = false; }
     } else if (act === 'pay') {
       const to = btn.dataset.pay;
       const body = { paymentStatus: to };
-      if (to === 'paid') body.paymentMethod = $('#payMethod').value;
       const labels = { paid: 'Payment recorded', refunded: 'Marked as refunded', failed: 'Marked as failed', pending: 'Reset to unpaid' };
       send('/payment', body, labels[to]);
     }
@@ -1099,7 +1074,7 @@ async function renderPayments(params) {
           <td>${esc(custName(b))}<span class="sub">${esc(b.user ? b.user.email : '')}</span></td>
           <td>${esc(courtOf(b))}<span class="sub">${fmtDate(b.date)}, ${esc(b.startTime)} &middot; ${pillS(b.status)}</span></td>
           <td class="r num">${peso(b.totalFee)}</td>
-          <td>${pillP(b.paymentStatus)}${b.paymentMethod ? `<span class="sub">${esc(b.paymentMethod)}</span>` : ''}</td>
+          <td>${pillP(b.paymentStatus)}</td>
           <td class="r">${btns.join(' ')}</td></tr>`;
       }).join('') : emptyRow(6, 'No payments match. Try another status.')}</tbody></table></div>${pager(d)}`;
   }
@@ -1125,13 +1100,12 @@ function quickPay(kind, b) {
   openModal(refund ? 'Refund payment' : 'Record payment', `
     <form id="payForm">
       <p>${refund ? 'Mark' : 'Record'} <b class="num">${peso(b.totalFee)}</b> ${refund ? 'as refunded for' : 'as paid for'} booking <b class="num">${esc(b.referenceNumber)}</b> (${esc(custName(b))}).</p>
-      ${refund ? '' : field('Paid by', `<select name="paymentMethod">${optionList(['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'].map((m) => [m, m]), 'Cash')}</select>`)}
       <div class="dlg-foot"><button type="button" class="btn" id="payCancel">Cancel</button><button type="submit" class="btn ${refund ? 'solid-danger' : 'primary'}">${refund ? 'Mark refunded' : 'Record payment'}</button></div>
       <div class="msg error hidden" role="alert"></div>
     </form>`);
   $('#payCancel').onclick = closeModal;
   onSubmit($('#payForm'), async (data) => {
-    await api(`/bookings/${b._id}/payment`, { method: 'PATCH', body: { paymentStatus: refund ? 'refunded' : 'paid', paymentMethod: data.paymentMethod }, version: b.writeTS });
+    await api(`/bookings/${b._id}/payment`, { method: 'PATCH', body: { paymentStatus: refund ? 'refunded' : 'paid' }, version: b.writeTS });
     toast(refund ? 'Marked as refunded' : 'Payment recorded');
     closeModal();
     // summary tiles changed too, so redraw the whole view (same page and filters)
@@ -1468,7 +1442,7 @@ const policyPreview = (lines) => [['booking', 'Booking'], ['cancellation', 'Canc
 const numField = (name, label, value, max, hint) => field(label, `<input name="${name}" type="number" min="0" max="${max}" step="1" required value="${esc(value)}" />`, hint);
 
 async function renderSettings() {
-  setHead('Hours & rules', 'Opening hours, booking rules, the cancellation policy and payment settings');
+  setHead('Hours & rules', 'Opening hours, booking rules and the cancellation policy');
   const { settings: s } = await api('/settings');
   const hasPin = s.facilityLat != null && s.facilityLng != null;
   const r = s.rules;
@@ -1505,9 +1479,6 @@ async function renderSettings() {
         ${field('Note for customers (optional)', `<textarea name="policyNote" rows="2" maxlength="500" placeholder="e.g. No-shows are not refunded.">${esc(r.policyNote)}</textarea>`)}
         <p class="sub" style="margin:0;">When the facility cancels or does not approve a paid booking, it is always refunded in full. What is owed shows under <a href="#/refunds">Payments, Refunds</a>.</p>
 
-        <h2 style="font-size:15px;margin-top:24px;">Payments</h2>
-        ${field('Payment methods customers can choose', `<input name="paymentMethods" required maxlength="400" value="${esc(r.paymentMethods.join(', '))}" />`, 'Separate them with commas, e.g. GCash, Maya, Bank transfer. Customers pick one when they send their payment reference.')}
-        ${field('Payment instructions (optional)', `<textarea name="paymentInstructions" rows="3" maxlength="600" placeholder="e.g. GCash 0917 123 4567 (Juan Dela Cruz). Send the reference number after paying.">${esc(r.paymentInstructions)}</textarea>`, 'Shown above the payment form on the customer booking page.')}
 
         <div class="dlg-foot" style="justify-content:flex-start;"><button class="btn primary" type="submit">Save settings</button></div>
         <div class="msg error hidden" role="alert"></div>
@@ -1523,13 +1494,13 @@ async function renderSettings() {
       <span><b>Facility location</b><span class="sub" style="display:block;">${hasPin ? 'Pinned on the map.' : 'Not pinned yet.'} The map pin, address and directions customers see.</span></span>
       <a class="btn" href="#/location">Open Location</a></div></div>
     <div class="card" style="margin-top:12px;"><div class="pad" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-      <span><b>Integrations</b><span class="sub" style="display:block;">Google, HitPay, Turnstile, map and weather: turn them on or off and see how to set them up.</span></span>
+      <span><b>Integrations</b><span class="sub" style="display:block;">Google, Turnstile, map, weather and the custom API: turn them on or off and see how to set them up.</span></span>
       <a class="btn" href="#/integrations">Manage integrations</a></div></div>
     </div>
     </div>`;
   // the location and integrations cards sit in the side column on wide screens
   const form = $('#setForm');
-  const RULE_KEYS = ['maxAdvanceDays', 'minNoticeHours', 'maxUpcomingPerCustomer', 'cancelCutoffHours', 'rescheduleCutoffHours', 'fullRefundHours', 'lateRefundPercent', 'policyNote', 'paymentMethods', 'paymentInstructions'];
+  const RULE_KEYS = ['maxAdvanceDays', 'minNoticeHours', 'maxUpcomingPerCustomer', 'cancelCutoffHours', 'rescheduleCutoffHours', 'fullRefundHours', 'lateRefundPercent', 'policyNote'];
   onSubmit(form, async (data) => {
     const rules = Object.fromEntries(RULE_KEYS.map((k) => [k, data[k]]));
     const res = await api('/settings', { method: 'PUT', body: {
@@ -1538,7 +1509,6 @@ async function renderSettings() {
     if (res.settings) {
       s.writeTS = res.settings.writeTS; // the form stays open: the next save builds on this version
       $('#policyPreview').innerHTML = policyPreview(res.settings.policyLines);
-      form.querySelector('[name=paymentMethods]').value = res.settings.rules.paymentMethods.join(', ');
     }
     toast(res.updatedCourts ? `Saved. Hours updated on ${res.updatedCourts} court${res.updatedCourts === 1 ? '' : 's'}.` : 'Settings saved');
     form.querySelector('[name=applyToCourts]').checked = false;
@@ -1800,7 +1770,6 @@ async function initFacilityMap(pin) {
 const INT_ICON = {
   googleSignIn: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>',
   turnstile: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
-  hitpay: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
   googleCalendar: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   maps: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
   weather: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -1831,18 +1800,6 @@ const INTEGRATIONS = [
       'Put the site key and secret key in backend/.env and restart the server.',
     ],
     more: 'Runs invisibly on the admin sign-in and the customer login, sign-up and forgot-password pages. Testing keys that always pass are listed in backend/.env.example.',
-  },
-  {
-    key: 'hitpay', name: 'HitPay', group: 'Payments',
-    what: 'Customers pay online by GCash, QR Ph, card and more',
-    env: ['HITPAY_API_KEY', 'HITPAY_SANDBOX', 'HITPAY_WEBHOOK_SALT'],
-    steps: [
-      'Sign up at hitpayapp.com. While testing, use a sandbox account (dashboard.sandbox.hit-pay.com).',
-      'HitPay dashboard → Settings → API Keys. Copy the API key into <code>HITPAY_API_KEY</code>. Keep <code>HITPAY_SANDBOX=true</code> for sandbox keys; set it to <code>false</code> with live keys.',
-      'For automatic "paid" updates: Developers → Webhook Endpoints, add <code>https://&lt;your-site&gt;/api/webhooks/hitpay</code> for the event <code>payment_request.completed</code>, and put that endpoint\'s salt in <code>HITPAY_WEBHOOK_SALT</code>. HitPay needs a public https address, so this doesn\'t work on localhost.',
-      'Restart the server, open a booking and press "Send payment link".',
-    ],
-    more: 'Customers get a "Pay online now" button on their booking and pay with any method switched on in your HitPay account. After paying they come back to their booking, which then shows the payment. Staff can also send a link from a booking. Turning it off stops new links. Payments already made on a link are still recorded.',
   },
   {
     key: 'googleCalendar', name: 'Google Calendar', group: 'Scheduling',
@@ -1931,8 +1888,6 @@ function serverSettingsCard(e) {
 /** One short line that needs the admin's attention, or ''. */
 function integrationNote(x, st, facility) {
   if (!st.active) return '';
-  if (x.key === 'hitpay') return [st.sandbox ? 'Sandbox: test payments only' : '', !st.webhook ? 'no webhook: payments show when the customer comes back, or press "Check payment"' : '']
-    .filter(Boolean).join(' · ').replace(/^./, (c) => c.toUpperCase());
   if (x.key === 'weather' && facility.lat == null) return 'Using Metro Manila until you <a href="#/location">pin the facility</a>';
   if (x.key === 'maps' && facility.lat == null) return 'Not pinned yet: customers can\'t see the map. <a href="#/location">Pin the facility</a>';
   if (x.key === 'webhook' && st.failed) return `${st.failed} event${st.failed === 1 ? '' : 's'} could not be delivered in the last day. Open Details to see why.`;
@@ -2172,10 +2127,6 @@ function integrationGuide(x, st, facility) {
     facts.push(st.customerClient === 'own'
       ? 'Customers: their own client ID in <code>CUSTOM_GOOGLE_CLIENT_ID</code> (login and sign-up pages).'
       : 'Customers: the same client ID as staff. Set <code>CUSTOM_GOOGLE_CLIENT_ID</code> to give them their own.');
-  }
-  if (x.key === 'hitpay' && st.configured) {
-    facts.push(st.sandbox ? 'Sandbox keys: payments are tests, no real money moves.' : 'Live keys: real payments.');
-    facts.push(st.webhook ? 'Webhook salt set: payments are recorded automatically.' : 'No webhook salt: a payment is recorded when the customer comes back to their booking, or when staff press "Check payment".');
   }
   if (x.key === 'maps' && facility.lat != null) facts.push(`Pinned at ${esc(Number(facility.lat).toFixed(4))}, ${esc(Number(facility.lng).toFixed(4))}${facility.address ? ` (${esc(facility.address)})` : ''}.`);
   if (x.more) facts.push(esc(x.more));

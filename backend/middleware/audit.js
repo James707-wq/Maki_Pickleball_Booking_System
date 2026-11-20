@@ -53,8 +53,6 @@ const RULES = [
   [/^PATCH \/feedback\/[^/]+$/, 'Updated customer feedback'],
   [/^POST \/issues\/[^/]+\/reply$/, 'Replied to a customer issue'],
   [/^PATCH \/issues\/[^/]+$/, 'Updated an issue status'],
-  [/^POST \/bookings\/[^/]+\/hitpay-link$/, 'Sent a HitPay payment link'],
-  [/^POST \/bookings\/[^/]+\/hitpay-check$/, 'Checked a HitPay payment'],
   [/^POST \/integrations\/verify$/, 'Asked for a code to change integrations'],
   [/^POST \/integrations\/verify\/resend$/, 'Asked for a new integration code'],
   [/^PUT \/integrations$/, 'Turned integrations on or off'],

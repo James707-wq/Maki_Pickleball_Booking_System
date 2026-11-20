@@ -7,8 +7,7 @@
  * Format: <requests>/<window>, the window in s, m or h (30/15m, 300/1m, 1000/1h); "off" turns one off.
  *
  * Signed-in people are counted by account (a whole school's shared Wi-Fi is not one bucket), everyone else by IP
- * address (IPv6 by its /64 network, which one device can hold). The HitPay webhook is never limited: HitPay retries,
- * and its requests are signed. Over the limit: 429 with Retry-After, the standard RateLimit headers and a JSON message.
+ * address (IPv6 by its /64 network, which one device can hold). Over the limit: 429 with Retry-After, the standard RateLimit headers and a JSON message.
  * GET /api/rate-limit tells the caller where they stand (it is not counted itself). Admins see the limits and who
  * hit them under Security -> Login security; a sign-in flood also alerts them.
  * Counts live in the server's memory: they start over when it restarts, and each server process counts on its own.
@@ -26,9 +25,9 @@ const MESSAGES = {
   api: 'Too many requests.',
   create: 'You are doing that too often.',
 };
-// routes that create something (bookings that hold a slot, payment links that call HitPay, messages that reach people)
+// routes that create something (bookings that hold a slot, messages that reach people)
 const CREATE_ROUTES = [
-  '/api/bookings', '/api/bookings/:id/payment-proof', '/api/bookings/:id/pay-online',
+  '/api/bookings',
   '/api/feedback', '/api/issues', '/api/issues/:id/reply',
   '/api/admin/notifications', '/api/admin/announcements',
 ];
@@ -144,8 +143,8 @@ function createRateLimits(env = process.env, { onBlocked = null } = {}) {
   };
   const limiters = {
     auth: make('auth', byIp),
-    // auth has its own limit, the HitPay webhook none, and the status endpoint is free to ask
-    api: make('api', byAccount, (req) => /^\/api\/(auth|webhooks)\//.test(req.originalUrl)
+    // auth has its own limit, and the status endpoint is free to ask
+    api: make('api', byAccount, (req) => /^\/api\/auth\//.test(req.originalUrl)
       || (req.method === 'GET' && req.originalUrl.split('?')[0] === '/api/rate-limit')),
     create: make('create', byAccount),
   };

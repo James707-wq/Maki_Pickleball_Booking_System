@@ -52,7 +52,6 @@ const pageOf = (req, def = 20) => {
 };
 const paged = (total, page, limit) => ({ total, page, pages: Math.max(Math.ceil(total / limit), 1) });
 const withRefs = (q) => q.populate('user', 'firstName lastName email phone').populate('court', 'name location');
-const methodOf = (v) => String(v || '').trim().slice(0, 40);
 
 // "from"/"to" query -> Manila day range; defaults to the last 30 days
 function range(req) {
@@ -134,7 +133,6 @@ router.get('/bookings/:id/receipt', authorize('payments', 'bookings'), async (re
         court: b.courtName, location: b.court && b.court.location ? b.court.location : '',
         date: U.toDateStr(b.date), startTime: b.startTime, endTime: b.endTime,
         fee: b.totalFee + (b.discount || 0), discount: b.discount || 0, promoCode: b.promoCode || '', total: b.totalFee,
-        method: b.paymentMethod || (pay && pay.method) || '', paymentReference: b.paymentReference || '',
         receivedBy: staffName(pay && pay.recordedBy) || (b.source === 'desk' ? 'Front desk' : ''),
         paymentStatus: b.paymentStatus,
         refund: b.paymentStatus === 'refunded' ? { amount: (b.refund && b.refund.amount) || (refund && refund.amount) || b.totalFee, at: (b.refund && b.refund.at) || (refund && refund.createdAt) || null } : null,
@@ -173,9 +171,9 @@ router.post('/bookings/:id/refund', authorize('payments'), async (req, res) => {
     if (!Number.isFinite(amount) || amount <= 0 || amount > booking.totalFee) return bad(res, `Refund must be between 1 and ${booking.totalFee}`);
 
     booking.paymentStatus = 'refunded';
-    booking.refund = { amount, reason, method: methodOf(req.body.method) || booking.paymentMethod, at: new Date(), by: req.user._id };
+    booking.refund = { amount, reason, at: new Date(), by: req.user._id };
     await booking.save();
-    await logTransaction(booking, 'refund', { amount, method: booking.refund.method, note: reason, by: req.user._id });
+    await logTransaction(booking, 'refund', { amount, note: reason, by: req.user._id });
     await U.notify(booking.user, `A refund of ₱${amount} for booking ${booking.referenceNumber} has been processed.`,
       { subject: `Refund for booking ${booking.referenceNumber}`, booking });
     res.json({ success: true, booking: await withRefs(Booking.findById(booking._id)) });
@@ -203,8 +201,8 @@ router.get('/transactions', authorize('payments'), async (req, res) => {
     if (req.query.format === 'csv') { // AF-143 export: every matching row
       const all = await Transaction.find(filter).sort({ createdAt: -1 }).limit(CSV.MAX_ROWS).populate('user', 'firstName lastName email').populate('recordedBy', 'firstName lastName').lean();
       const who = (u) => (u ? `${u.firstName} ${u.lastName}` : '');
-      return CSV.send(res, `Transactions ${U.todayStr()}`, ['When', 'Reference', 'Customer', 'Email', 'Type', 'Method', 'Amount (PHP)', 'Note', 'Recorded by'],
-        all.map((t) => [t.createdAt, t.referenceNumber, t.user ? who(t.user) : t.customerName ? `${t.customerName} (walk-in)` : 'Deleted user', t.user ? t.user.email : '', t.type, t.method || '', t.amount, t.note || '', who(t.recordedBy)]));
+      return CSV.send(res, `Transactions ${U.todayStr()}`, ['When', 'Reference', 'Customer', 'Email', 'Type', 'Amount (PHP)', 'Note', 'Recorded by'],
+        all.map((t) => [t.createdAt, t.referenceNumber, t.user ? who(t.user) : t.customerName ? `${t.customerName} (walk-in)` : 'Deleted user', t.user ? t.user.email : '', t.type, t.amount, t.note || '', who(t.recordedBy)]));
     }
     // staff (no analytics) get totals for a shift or a few weeks (from and to, up to 31 days), not all-time takings
     const spanDays = filter.createdAt && filter.createdAt.$gte && filter.createdAt.$lt ? (filter.createdAt.$lt - filter.createdAt.$gte) / 864e5 : Infinity;
@@ -618,11 +616,10 @@ router.get('/analytics/revenue', authorize('analytics'), async (req, res) => {
       Booking.find({ paymentStatus: 'pending', status: { $in: ['pending', 'confirmed', 'completed'] }, date: { $gte: r.gte, $lt: r.lt } }).select('totalFee').lean(),
     ]);
     const perDay = Object.fromEntries(dayList(r).map((d) => [d, 0]));
-    const byCourt = {}; const byMethod = {};
+    const byCourt = {};
     pay.forEach((t) => {
       const d = U.toDateStr(t.createdAt); if (d in perDay) perDay[d] += t.amount;
       byCourt[t.courtName || 'Unknown'] = (byCourt[t.courtName || 'Unknown'] || 0) + t.amount;
-      byMethod[t.method || 'Not recorded'] = (byMethod[t.method || 'Not recorded'] || 0) + t.amount;
     });
     const gross = pay.reduce((s, t) => s + t.amount, 0);
     const refunded = refunds.reduce((s, t) => s + t.amount, 0);
@@ -631,7 +628,6 @@ router.get('/analytics/revenue', authorize('analytics'), async (req, res) => {
       totals: { gross, refunded, net: gross - refunded, payments: pay.length, average: pay.length ? Math.round(gross / pay.length) : 0, outstanding: outstanding.reduce((s, b) => s + b.totalFee, 0) },
       perDay: Object.entries(perDay).map(([date, amount]) => ({ date, amount })),
       byCourt: Object.entries(byCourt).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount),
-      byMethod: Object.entries(byMethod).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount),
     });
   } catch (err) { handleError(res, err); }
 });
@@ -710,9 +706,9 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
         const sum = (st) => live.filter((b) => b.paymentStatus === st).reduce((s, b) => s + b.totalFee, 0);
         report = {
           title: 'Payments report',
-          columns: ['Reference', 'Customer', 'Date', 'Method', 'Payment status', 'Amount'],
-          rows: live.map((b) => [b.referenceNumber, name(b), U.toDateStr(b.date), b.paymentMethod || '-', b.paymentStatus, b.totalFee]),
-          money: [5],
+          columns: ['Reference', 'Customer', 'Date', 'Payment status', 'Amount'],
+          rows: live.map((b) => [b.referenceNumber, name(b), U.toDateStr(b.date), b.paymentStatus, b.totalFee]),
+          money: [4],
           summary: [{ label: 'Paid', value: peso(sum('paid')) }, { label: 'Unpaid', value: peso(sum('pending')) }, { label: 'Failed', value: peso(sum('failed')) }, { label: 'Refunded', value: peso(sum('refunded')) }],
         };
       }
@@ -745,9 +741,9 @@ router.get('/reports/:type', authorize('reports'), async (req, res) => {
       const sum = (t) => tx.filter((x) => x.type === t).reduce((s, x) => s + x.amount, 0);
       report = {
         title: 'Transactions report',
-        columns: ['When', 'Reference', 'Type', 'Method', 'Amount', 'Note'],
-        rows: tx.map((t) => [t.createdAt, t.referenceNumber, t.type, t.method || '-', t.amount, t.note || '']),
-        money: [4],
+        columns: ['When', 'Reference', 'Type', 'Amount', 'Note'],
+        rows: tx.map((t) => [t.createdAt, t.referenceNumber, t.type, t.amount, t.note || '']),
+        money: [3],
         dates: [0],
         summary: [{ label: 'Payments', value: peso(sum('payment')) }, { label: 'Refunds', value: peso(sum('refund')) }, { label: 'Net', value: peso(sum('payment') - sum('refund')) }],
       };

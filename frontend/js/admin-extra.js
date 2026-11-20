@@ -57,18 +57,17 @@ async function renderVerify() {
   setHead('Payment verification', 'Customers send their payment reference here. Check it, then verify or reject.');
   const { bookings } = await api('/payments/verification');
   view.innerHTML = `<div class="card"><div class="tablewrap"><table>
-    <thead><tr><th>Booking</th><th>Customer</th><th class="r">Amount</th><th>Paid via</th><th>Their reference</th><th>Sent</th><th></th></tr></thead>
+    <thead><tr><th>Booking</th><th>Customer</th><th class="r">Amount</th><th>Their reference</th><th>Sent</th><th></th></tr></thead>
     <tbody>${bookings.length ? bookings.map((b) => `<tr>
       <td class="num"><b>${esc(b.referenceNumber)}</b><span class="sub">${esc(courtOf(b))} &middot; ${fmtDate(b.date)}</span></td>
       <td>${esc(custName(b))}<span class="sub">${esc(b.user ? b.user.email : '')}</span></td>
       <td class="r num">${money(b.totalFee)}${b.discount ? `<span class="sub">promo ${esc(b.promoCode)} −${money(b.discount)}</span>` : ''}</td>
-      <td>${esc(b.paymentMethod || '-')}</td>
       <td class="num"><b>${esc(b.paymentReference || '-')}</b></td>
       <td>${esc(ago(b.paymentSubmittedAt))}</td>
       <td class="r"><div class="btnrow" style="justify-content:flex-end;">
         <button class="btn small primary" data-act="verify" data-id="${esc(b._id)}">Verify</button>
         <button class="btn small danger" data-act="reject" data-id="${esc(b._id)}">Reject</button></div></td></tr>`).join('')
-      : emptyRow(7, 'Nothing to verify right now. New payment submissions will show up here.')}</tbody></table></div></div>`;
+      : emptyRow(6, 'Nothing to verify. Customers pay at the desk or online now; a reference only shows here if one was sent before.')}</tbody></table></div></div>`;
   refreshView = renderVerify;
   view.onclick = (e) => {
     const b = e.target.closest('[data-act]');
@@ -82,7 +81,7 @@ function verifyDialog(b, approve) {
   openModal(approve ? 'Verify payment' : 'Reject payment', `
     <form id="vForm">
       <p>${approve ? 'Confirm you received' : 'Reject the payment of'} <b class="num">${money(b.totalFee)}</b> for <b class="num">${esc(b.referenceNumber)}</b>.<br>
-      <span class="muted">${esc(b.paymentMethod)} reference: <b class="num">${esc(b.paymentReference)}</b></span></p>
+      <span class="muted">Their reference: <b class="num">${esc(b.paymentReference)}</b></span></p>
       ${approve ? '' : field('Reason (the customer will see this)', '<input name="note" maxlength="200" placeholder="e.g. Reference number not found" required />')}
       <div class="dlg-foot"><button type="button" class="btn" id="vCancel">Cancel</button>
       <button type="submit" class="btn ${approve ? 'primary' : 'solid-danger'}">${approve ? 'Mark as paid' : 'Reject payment'}</button></div>
@@ -128,7 +127,7 @@ async function renderRefunds() {
     <div class="card"><h2>Refund history</h2>
       ${table(done, '<th>Booking</th><th>Customer</th><th>Refunded</th><th>Reason</th><th>When</th>',
         (b) => `<tr><td class="num"><b>${esc(b.referenceNumber)}</b></td><td>${esc(custName(b))}</td>
-          <td class="num">${money((b.refund && b.refund.amount) || b.totalFee)}<span class="sub">of ${money(b.totalFee)}${b.refund && b.refund.method ? ' &middot; ' + esc(b.refund.method) : ''}</span></td>
+          <td class="num">${money((b.refund && b.refund.amount) || b.totalFee)}<span class="sub">of ${money(b.totalFee)}</span></td>
           <td>${esc((b.refund && b.refund.reason) || '-')}</td><td>${b.refund && b.refund.at ? esc(ago(b.refund.at)) : '-'}</td></tr>`,
         'No refunds yet.')}
     </div>`;
@@ -150,14 +149,13 @@ function refundDialog(b, { anyway = false } = {}) {
       <p>Booking <b class="num">${esc(b.referenceNumber)}</b> for ${esc(custName(b))}. The customer paid <b class="num">${money(b.totalFee)}</b>.</p>
       ${policy}
       ${field('Refund amount (₱)', `<input name="amount" type="number" min="1" max="${b.totalFee}" step="1" value="${due}" required />`, 'Lower it for a partial refund.')}
-      ${field('Refunded via', `<select name="method">${optionList(['Cash', 'GCash', 'Maya', 'Card', 'Bank transfer', 'Other'].map((m) => [m, m]), b.paymentMethod || 'Cash')}</select>`)}
       ${field('Reason', `<input name="reason" maxlength="200" value="${esc(b.statusReason ? 'Booking ' + b.status + ': ' + b.statusReason : 'Booking ' + b.status)}" required />`)}
       <div class="dlg-foot"><button type="button" class="btn" id="rfCancel">Cancel</button><button type="submit" class="btn solid-danger">Process refund</button></div>
       <div class="msg error hidden" role="alert"></div>
     </form>`);
   $('#rfCancel').onclick = closeModal;
   onSubmit($('#rfForm'), async (data) => {
-    await api(`/bookings/${b._id}/refund`, { method: 'POST', body: { amount: Number(data.amount), method: data.method, reason: data.reason }, version: b.writeTS });
+    await api(`/bookings/${b._id}/refund`, { method: 'POST', body: { amount: Number(data.amount), reason: data.reason }, version: b.writeTS });
     toast('Refund recorded; the customer was notified');
     closeModal(); renderRefunds(); 
   });
@@ -194,16 +192,15 @@ async function renderTransactions(params) {
       <div><div class="k">Net</div><div class="v num">${money(d.totals.payment - d.totals.refund)}</div></div>`;
     const typePill = (t) => pillX(`t-${t}`, { payment: 'Payment', refund: 'Refund', failed: 'Failed' }[t]);
     $('#listCard').innerHTML = `<div class="tablewrap"><table>
-      <thead><tr><th>When</th><th>Booking</th><th>Customer</th><th>Type</th><th>Method</th><th class="r">Amount</th><th>Recorded by</th></tr></thead>
+      <thead><tr><th>When</th><th>Booking</th><th>Customer</th><th>Type</th><th class="r">Amount</th><th>Recorded by</th></tr></thead>
       <tbody>${d.transactions.length ? d.transactions.map((t) => `<tr>
         <td>${esc(ago(t.createdAt))}</td>
         <td class="num"><b>${esc(t.referenceNumber)}</b><span class="sub">${esc(t.courtName)}</span></td>
         <td>${t.user ? esc(t.user.firstName + ' ' + t.user.lastName) : t.customerName ? `${esc(t.customerName)} (walk-in)` : 'Deleted user'}</td>
         <td>${typePill(t.type)}${t.note ? `<span class="sub">${esc(t.note)}</span>` : ''}</td>
-        <td>${esc(t.method || '-')}</td>
         <td class="r num ${t.type === 'refund' ? 'neg' : ''}">${t.type === 'refund' ? '−' : ''}${money(t.amount)}</td>
         <td>${t.recordedBy ? esc(t.recordedBy.firstName + ' ' + t.recordedBy.lastName) : '-'}</td></tr>`).join('')
-        : emptyRow(7, 'No transactions match these filters.')}</tbody></table></div>${pager2(d, 'transaction')}`;
+        : emptyRow(6, 'No transactions match these filters.')}</tbody></table></div>${pager2(d, 'transaction')}`;
   }
   refreshView = () => load().catch((e) => toast(e.message, true));
   refreshView();
@@ -679,9 +676,7 @@ async function renderAnalytics(params) {
         html = `<div class="card ribbon">${kpi('Collected', money(d.totals.gross), d.totals.payments + ' payments')}${kpi('Refunded', money(d.totals.refunded))}
           ${kpi('Net income', money(d.totals.net), 'collected minus refunds')}${kpi('Still to collect', money(d.totals.outstanding), 'unpaid bookings in range')}</div>
           <div class="card"><h2>Income per day</h2>${columns(d.perDay.length, d.perDay, 'amount')}<div class="legend"><span>Hover a bar for the amount. Average payment ${money(d.totals.average)}.</span></div></div>
-          <div class="grid2" style="grid-template-columns:1fr 1fr;margin-top:16px;">
-            <div class="card"><h2>Income by court</h2><div class="pad">${hbars(d.byCourt.map((c) => ({ label: c.name, v: c.amount })), money, 'No payments in this range.')}</div></div>
-            <div class="card"><h2>Income by payment method</h2><div class="pad">${hbars(d.byMethod.map((c) => ({ label: c.name, v: c.amount })), money, 'No payments in this range.')}</div></div></div>`;
+          <div class="card" style="margin-top:16px;"><h2>Income by court</h2><div class="pad">${hbars(d.byCourt.map((c) => ({ label: c.name, v: c.amount })), money, 'No payments in this range.')}</div></div>`;
       } else {
         html = `<div class="card ribbon">${kpi('Registered customers', d.totals.total, d.totals.active + ' active, ' + d.totals.inactive + ' deactivated')}${kpi('New in range', d.totals.newUsers)}
           ${kpi('Booked in range', d.totals.activeBookers, d.totals.bookings + ' bookings')}${kpi('Repeat customers', d.totals.repeatCustomers, d.totals.neverBooked + ' never booked')}</div>
@@ -1162,7 +1157,6 @@ function receiptHtml(r) {
     ${row('Play time', `${esc(fmtDate(`${r.date}T00:00:00+08:00`))}, ${esc(r.startTime)}–${esc(r.endTime)}`)}
     ${r.discount ? row('Court fee', peso(r.fee)) + row(`Discount${r.promoCode ? ` (${esc(r.promoCode)})` : ''}`, `−${peso(r.discount)}`) : ''}
     <div class="rc-row rc-total"><span>Total paid</span><b class="num">${peso(r.total)}</b></div>
-    ${row('Paid with', `${esc(r.method || '-')}${r.paymentReference ? ` <span class="muted">ref ${esc(r.paymentReference)}</span>` : ''}`)}
     ${r.receivedBy ? row('Received by', esc(r.receivedBy)) : ''}
     ${r.refund ? `<div class="rc-refund">Refunded ${peso(r.refund.amount)}${r.refund.at ? ` on ${esc(fmtStamp(r.refund.at))}` : ''}</div>` : ''}
     <p class="rc-foot">Thank you for playing! Keep this receipt for your records.</p>`;

@@ -1,13 +1,12 @@
 /**
- * Booking rules (AF-136), the cancellation and refund policy (AF-137) and the payment settings.
+ * Booking rules (AF-136) and the cancellation and refund policy (AF-137). (Payment methods and online payment were
+ * removed: customers pay at the front desk, and no method is chosen or recorded.)
  * The admin sets them under Hours & rules; they live in the Settings document (Settings.rules).
  * The customer booking routes enforce them and the customer pages show describe(). Staff are never
  * limited by them: in the admin console they can still book, move and cancel any booking.
  * Every number is a whole number; 0 always means "no limit" (or "until the start time").
  */
 const { startInstant, toDateStr, manilaMidnight } = require('./bookingUtils');
-
-const DEFAULT_METHODS = ['GCash', 'Maya', 'Bank transfer', 'Card', 'Other'];
 
 /** name -> [min, max, label for messages, unit] */
 const NUMBERS = {
@@ -19,9 +18,8 @@ const NUMBERS = {
   fullRefundHours: [0, 720, 'How early a cancellation must be for a full refund', 'hours'],
   lateRefundPercent: [0, 100, 'The refund for later cancellations', 'percent'],
 };
-const TEXTS = { policyNote: 500, paymentInstructions: 600 };
-const MAX_METHODS = 10;
-const METHOD_LENGTH = 30;
+const TEXTS = { policyNote: 500 };
+const PAYMENT_LINE = 'Pay at the front desk when you arrive.';
 
 const DEFAULTS = Object.freeze({
   maxAdvanceDays: 0,
@@ -32,8 +30,6 @@ const DEFAULTS = Object.freeze({
   fullRefundHours: 0, // 0 = every cancellation of a paid booking is refunded in full
   lateRefundPercent: 100,
   policyNote: '',
-  paymentMethods: DEFAULT_METHODS,
-  paymentInstructions: '',
 });
 
 const HOUR = 3600e3;
@@ -53,20 +49,6 @@ function rulesOf(settings) {
     out[k] = Number.isInteger(v) && v >= min && v <= max ? v : DEFAULTS[k];
   });
   Object.keys(TEXTS).forEach((k) => { out[k] = typeof plain[k] === 'string' ? plain[k] : DEFAULTS[k]; });
-  const methods = Array.isArray(plain.paymentMethods) ? plain.paymentMethods.map((m) => String(m).trim()).filter(Boolean) : [];
-  out.paymentMethods = methods.length ? methods : [...DEFAULT_METHODS];
-  return out;
-}
-
-/** "GCash, Maya" or ["GCash", "Maya"] -> trimmed list without repeats (first spelling wins). */
-function methodList(value) {
-  const raw = Array.isArray(value) ? value : String(value ?? '').split(/[\n,]/);
-  const seen = new Set();
-  const out = [];
-  raw.map((m) => String(m).trim().replace(/\s+/g, ' ')).filter(Boolean).forEach((m) => {
-    const key = m.toLowerCase();
-    if (!seen.has(key)) { seen.add(key); out.push(m); }
-  });
   return out;
 }
 
@@ -88,16 +70,9 @@ function checkSettings(body = {}) {
   Object.entries(TEXTS).forEach(([k, maxLen]) => {
     if (!(k in body)) return;
     const v = String(body[k] ?? '').trim();
-    if (v.length > maxLen) problems.push(`${k === 'policyNote' ? 'The note for customers' : 'The payment instructions'} can be at most ${maxLen} characters (now ${v.length})`);
+    if (v.length > maxLen) problems.push(`The note for customers can be at most ${maxLen} characters (now ${v.length})`);
     else values[k] = v;
   });
-  if ('paymentMethods' in body) {
-    const list = methodList(body.paymentMethods);
-    if (!list.length) problems.push('Add at least one payment method customers can choose, e.g. GCash');
-    else if (list.length > MAX_METHODS) problems.push(`List at most ${MAX_METHODS} payment methods`);
-    else if (list.some((m) => m.length > METHOD_LENGTH)) problems.push(`Each payment method can be at most ${METHOD_LENGTH} characters`);
-    else values.paymentMethods = list;
-  }
   return problems.length ? { problems } : { values };
 }
 
@@ -200,9 +175,8 @@ function describe(rules) {
     'If the facility cancels your booking or does not approve it, a payment is refunded in full.',
   ];
   if (r.policyNote) cancellation.push(r.policyNote);
-
-  const payment = [`Accepted: ${r.paymentMethods.join(', ')}.`];
-  if (r.paymentInstructions) payment.push(r.paymentInstructions);
+  // no payment methods to choose from and no online payment: customers pay at the front desk
+  const payment = [PAYMENT_LINE];
   return { booking, cancellation, payment };
 }
 
@@ -213,7 +187,7 @@ function publicView(rules) {
 }
 
 module.exports = {
-  DEFAULTS, DEFAULT_METHODS, NUMBERS, MAX_METHODS, METHOD_LENGTH,
-  rulesOf, methodList, checkSettings, lastBookableDate, bookingProblem, upcomingProblem, cancelCheck, rescheduleCheck,
+  DEFAULTS, NUMBERS,
+  rulesOf, checkSettings, lastBookableDate, bookingProblem, upcomingProblem, cancelCheck, rescheduleCheck,
   describe, publicView, span, peso,
 };

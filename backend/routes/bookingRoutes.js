@@ -181,48 +181,6 @@ router.post('/', async (req, res) => {
   }
 });
 
-/**
- * UF-121 / AF-121 - customer submits how they paid so staff can verify it.
- * POST /api/bookings/:id/payment-proof   body: { method, reference }
- */
-router.post('/:id/payment-proof', async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.id);
-    if (!booking || String(booking.user || '') !== String(req.user._id)) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-    C.assertFresh(req, booking, 'booking');
-    if (['cancelled', 'rejected'].includes(booking.status)) {
-      return res.status(400).json({ success: false, message: 'This booking is cancelled' });
-    }
-    if (!['pending', 'failed'].includes(booking.paymentStatus)) {
-      return res.status(400).json({ success: false, message: `Payment is already ${booking.paymentStatus}` });
-    }
-    const method = String(req.body.method || '').trim().slice(0, 40);
-    const reference = String(req.body.reference || '').trim().slice(0, 60);
-    if (!method || !reference) {
-      return res.status(400).json({ success: false, message: 'Choose how you paid and enter the reference number' });
-    }
-    // AF-136 payment settings: only the methods the facility accepts (same spelling as the admin wrote it)
-    const accepted = P.rulesOf(await Settings.get()).paymentMethods;
-    const match = accepted.find((m) => m.toLowerCase() === method.toLowerCase());
-    if (!match) {
-      return res.status(400).json({ success: false, message: `Choose one of the payment methods the facility accepts: ${accepted.join(', ')}. Reload the page if the list looks different.` });
-    }
-    booking.paymentMethod = match;
-    booking.paymentReference = reference;
-    booking.paymentSubmittedAt = new Date();
-    booking.paymentStatus = 'pending'; // a rejected payment goes back into the queue
-    booking.paymentNote = '';
-    await booking.save();
-    await U.notify(req.user._id, `We received your payment details for booking ${booking.referenceNumber}. Staff will verify them shortly.`);
-    await U.notifyStaff(`Payment to verify: ${req.user.firstName} ${req.user.lastName} sent ${match} reference ${reference} for booking ${booking.referenceNumber} (₱${booking.totalFee}).`,
-      'payments', { link: '#/verify' });
-    res.json({ success: true, booking });
-  } catch (err) {
-    handleError(res, err);
-  }
-});
 
 /**
  * AF-137 - what cancelling would mean right now, before the customer confirms:
@@ -396,63 +354,6 @@ router.patch('/:id/reschedule', async (req, res) => {
   } catch (err) {
     handleError(res, err);
   }
-});
-
-/** HitPay / setup problems are logged for staff; customers get a plain message. */
-const payOnlineError = (req, res, err) => {
-  if (err.status === 502) {
-    console.error(`Pay online failed for booking ${req.params.id}:`, err.message);
-    return res.status(502).json({ success: false, message: "Online payment isn't available right now. Please try again later or pay at the facility." });
-  }
-  if (err.status) return res.status(err.status).json({ success: false, message: err.message });
-  return handleError(res, err);
-};
-
-/**
- * UF-121 - customer pays online (HitPay: GCash, QR Ph, cards and more).
- * POST /api/bookings/:id/pay-online -> { checkoutUrl }. Owner only; only when HitPay is on.
- */
-router.post('/:id/pay-online', async (req, res) => {
-  try {
-    const { isActive } = require('../utils/integrations');
-    const hitpay = require('../utils/integrations/hitpay');
-    if (!(await isActive('hitpay'))) {
-      return res.status(400).json({ success: false, message: 'Online payment is not available right now. You can pay at the facility.' });
-    }
-    const booking = await Booking.findById(req.params.id);
-    if (!booking || String(booking.user || '') !== String(req.user._id)) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-    const { hitpay: link } = await hitpay.ensurePaymentLink(booking, { by: req.user._id });
-    res.json({ success: true, checkoutUrl: link.checkoutUrl, amount: link.amount });
-  } catch (err) { payOnlineError(req, res, err); }
-});
-
-/**
- * The customer is back from HitPay's checkout: ask HitPay (never the browser) whether it was paid.
- * POST /api/bookings/:id/pay-online/check -> { paid, paymentStatus }. Owner only; at most once per 10 s per booking.
- */
-router.post('/:id/pay-online/check', async (req, res) => {
-  try {
-    const hitpay = require('../utils/integrations/hitpay');
-    const booking = await Booking.findById(req.params.id);
-    if (!booking || String(booking.user || '') !== String(req.user._id)) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
-    if (!booking.hitpay || !booking.hitpay.requestId || booking.paymentStatus === 'paid') {
-      return res.json({ success: true, paid: booking.paymentStatus === 'paid', paymentStatus: booking.paymentStatus });
-    }
-    // claim the check atomically, so reloading the page can't flood HitPay (its API allows 70 calls a minute)
-    const since = new Date(Date.now() - 10 * 1000);
-    const claimed = await Booking.findOneAndUpdate(
-      { _id: booking._id, $or: [{ 'hitpay.checkedAt': { $exists: false } }, { 'hitpay.checkedAt': null }, { 'hitpay.checkedAt': { $lt: since } }] },
-      { $set: { 'hitpay.checkedAt': new Date() } },
-      { new: true }
-    );
-    if (!claimed) return res.json({ success: true, paid: false, paymentStatus: booking.paymentStatus, wait: true });
-    const r = await hitpay.settleBooking(claimed);
-    res.json({ success: true, paid: r.paid, paymentStatus: r.booking.paymentStatus });
-  } catch (err) { payOnlineError(req, res, err); }
 });
 
 /**

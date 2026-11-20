@@ -54,7 +54,6 @@ async function server(env, setup) {
   app.post('/api/auth/login', (req, res) => res.json({ success: true }));
   app.get('/api/facility', (req, res) => res.json({ success: true }));
   app.post('/api/issues', (req, res) => res.json({ success: true }));
-  app.post('/api/webhooks/hitpay', (req, res) => res.json({ success: true }));
   const s = await new Promise((resolve) => { const x = app.listen(0, '127.0.0.1', () => resolve(x)); });
   const base = `http://127.0.0.1:${s.address().port}`;
   const call = async (method, path, { token, headers = {} } = {}) => {
@@ -124,14 +123,6 @@ test('sign-in has its own limit per IP address and does not use up the general o
     assert.equal(no.json.limit, 'auth');
     assert.match(no.json.message, /^Too many sign-in attempts from your network\./);
     assert.equal((await t.call('GET', '/api/facility')).status, 200, 'sign-in requests are not counted twice');
-  } finally { t.close(); }
-});
-
-test('the HitPay webhook is never limited', async () => {
-  const t = await server({ RATE_LIMIT_API: '2/1m' });
-  try {
-    const all = await t.times(6, 'POST', '/api/webhooks/hitpay');
-    assert.ok(all.every((r) => r.status === 200));
   } finally { t.close(); }
 });
 

@@ -31,9 +31,8 @@ test('Google Calendar: all three keys, a readable private key, a service account
   assert.ok(has(problems({ ...ok, GOOGLE_SERVICE_ACCOUNT_EMAIL: 'me@gmail.com' }), /should end in \.iam\.gserviceaccount\.com/));
 });
 
-test('payments, Turnstile and email values that cannot work', () => {
-  assert.ok(has(problems({ HITPAY_API_KEY: 'k', HITPAY_SANDBOX: 'yes' }), /^HITPAY_SANDBOX must be true or false/));
-  assert.ok(has(problems({ HITPAY_WEBHOOK_SALT: 'salt' }), /HITPAY_WEBHOOK_SALT does nothing without HITPAY_API_KEY/));
+test('Turnstile and email values that cannot work; old HitPay values are no longer checked', () => {
+  assert.deepEqual(problems({ HITPAY_API_KEY: 'k', HITPAY_SANDBOX: 'yes', HITPAY_WEBHOOK_SALT: 'salt' }), [], 'HitPay was removed: only listed as unused');
   assert.ok(has(problems({ TURNSTILE_SITE_KEY: '0x4AAAAAAAabcdefghijk', TURNSTILE_SECRET_KEY: '0x4AAAAAAAabcdefghijk' }), /TURNSTILE_SECRET_KEY is the same as the site key/));
   assert.ok(has(problems({ TURNSTILE_SITE_KEY: '0x4AAAAAAAabcdefghijk' }), /^Cloudflare Turnstile needs .*TURNSTILE_SECRET_KEY is missing/));
   assert.deepEqual(problems({ TURNSTILE_SITE_KEY: '1x00000000000000000000AA', TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA' }), [], 'Cloudflare test keys');
@@ -64,12 +63,19 @@ test('BACKUP_DIR: never inside the frontend folder, which anyone can download fr
 });
 
 test('keys the app does not read are listed, with a note for retired ones', () => {
-  assert.deepEqual(E.unusedKeys({ GOOGLE_CLIENT_ID: ID, PAYMONGO_SECRET_KEY: '', SEMAPHORE_API_KEY: '', SEMAPHORE_SENDER_NAME: '', MY_OLD_KEY: 'x' }), [
+  assert.deepEqual(E.unusedKeys({ GOOGLE_CLIENT_ID: ID, HITPAY_API_KEY: 'k', PAYMONGO_SECRET_KEY: '', SEMAPHORE_API_KEY: '', SEMAPHORE_SENDER_NAME: '', MY_OLD_KEY: 'x' }), [
+    { key: 'HITPAY_API_KEY', note: 'HitPay online payment was removed' },
     { key: 'MY_OLD_KEY', note: '' },
-    { key: 'PAYMONGO_SECRET_KEY', note: 'PayMongo was replaced by HitPay' },
+    { key: 'PAYMONGO_SECRET_KEY', note: 'Online payment was removed' },
     { key: 'SEMAPHORE_API_KEY', note: 'SMS was removed' },
     { key: 'SEMAPHORE_SENDER_NAME', note: 'SMS was removed' },
   ]);
+});
+
+test('HitPay is gone like SMS: its keys are not checked, watched or counted as a service', () => {
+  assert.equal(E.KEYS.HITPAY_API_KEY, undefined);
+  assert.equal(E.WATCHED.some((k) => k.startsWith('HITPAY_')), false);
+  assert.equal(E.SERVICES.includes('hitpay'), false);
 });
 
 test('SMS is gone: its keys are not checked, watched or counted as a service', () => {
@@ -81,19 +87,19 @@ test('SMS is gone: its keys are not checked, watched or counted as a service', (
 
 test('changes between two starts: services set up or not, keys added, changed or removed', () => {
   const before = {
-    services: { googleSignIn: true, googleCalendar: false, hitpay: true },
-    fingerprints: { GOOGLE_CLIENT_ID: 'aa', GOOGLE_PRIVATE_KEY: '', HITPAY_API_KEY: 'hh', EMAIL_PASS: 'pp' },
+    services: { googleSignIn: true, googleCalendar: false, turnstile: true },
+    fingerprints: { GOOGLE_CLIENT_ID: 'aa', GOOGLE_PRIVATE_KEY: '', TURNSTILE_SECRET_KEY: 'tt', EMAIL_PASS: 'pp' },
   };
   const after = {
-    services: { googleSignIn: true, googleCalendar: true, hitpay: false },
-    fingerprints: { GOOGLE_CLIENT_ID: 'bb', GOOGLE_PRIVATE_KEY: 'kk', HITPAY_API_KEY: '', EMAIL_PASS: 'pp', RESEND_API_KEY: 'rr' },
+    services: { googleSignIn: true, googleCalendar: true, turnstile: false },
+    fingerprints: { GOOGLE_CLIENT_ID: 'bb', GOOGLE_PRIVATE_KEY: 'kk', TURNSTILE_SECRET_KEY: '', EMAIL_PASS: 'pp', RESEND_API_KEY: 'rr' },
   };
   assert.deepEqual(E.describeChanges(before, after), [
     'Google Calendar is now set up',
-    'HitPay is no longer set up',
+    'Cloudflare Turnstile is no longer set up',
     'GOOGLE_CLIENT_ID changed',
     'GOOGLE_PRIVATE_KEY added',
-    'HITPAY_API_KEY removed',
+    'TURNSTILE_SECRET_KEY removed',
   ], 'RESEND_API_KEY had no fingerprint before (a newly watched key), so it is not reported');
 });
 

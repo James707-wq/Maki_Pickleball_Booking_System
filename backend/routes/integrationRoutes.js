@@ -12,7 +12,6 @@ const handleError = require('../utils/handleError');
 const U = require('../utils/bookingUtils');
 const { status, isActive, NAMES, LABELS, forgetSwitches, planReset } = require('../utils/integrations');
 const { syncBookingToCalendar } = require('../utils/integrations/google');
-const hitpay = require('../utils/integrations/hitpay');
 const { getForecast, forecastLocation } = require('../utils/integrations/weather');
 const webhook = require('../utils/integrations/webhook');
 const { seal } = require('../utils/secretBox');
@@ -53,15 +52,15 @@ async function wantedChanges(body) {
   return { changes };
 }
 const sentence = (parts) => (parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]);
-const askText = (changes) => { // "Turn off HitPay and turn on Email"
+const askText = (changes) => { // "Turn off Weather and turn on Email"
   const s = sentence(Object.entries(changes).map(([n, on]) => `turn ${on ? 'on' : 'off'} ${LABELS[n]}`));
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
-const doneText = (changes) => Object.entries(changes).map(([n, on]) => `${LABELS[n]} ${on ? 'on' : 'off'}`).join(', '); // "HitPay off, Email on"
+const doneText = (changes) => Object.entries(changes).map(([n, on]) => `${LABELS[n]} ${on ? 'on' : 'off'}`).join(', '); // "Weather off, Email on"
 
 /**
  * Step 1: check the admin's PIN, keep the change, and send a one-time code to the admin.
- * body: { switches: { hitpay: false, ... }, pin }  ->  { challengeId, sentTo, expiresAt, resendIn, ... }
+ * body: { switches: { weather: false, ... }, pin }  ->  { challengeId, sentTo, expiresAt, resendIn, ... }
  */
 router.post('/integrations/verify', authorize('settings'), async (req, res) => {
   try {
@@ -170,28 +169,6 @@ router.post('/integrations/calendar/sync', authorize('settings'), async (req, re
       counts[r] = (counts[r] || 0) + 1;
     }
     res.json({ success: true, total: list.length, counts });
-  } catch (err) { fail(res, err); }
-});
-
-/** HitPay: create (or reuse) a payment link for a booking and tell the customer. */
-router.post('/bookings/:bookingId/hitpay-link', authorize('payments'), async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.bookingId);
-    if (!booking) return bad(res, 'Booking not found', 404);
-    if (!(await isActive('hitpay'))) return bad(res, 'HitPay is not set up or is turned off');
-    await hitpay.ensurePaymentLink(booking, { by: req.user._id, renew: req.body.renew === true });
-    await U.notify(booking.user, `Pay for booking ${booking.referenceNumber} online (GCash, QR Ph, card and more): open the booking from My Bookings and tap "Pay online now".`);
-    res.json({ success: true, hitpay: booking.hitpay });
-  } catch (err) { fail(res, err); }
-});
-
-/** HitPay: ask HitPay whether the link was paid, and record it if so. */
-router.post('/bookings/:bookingId/hitpay-check', authorize('payments'), async (req, res) => {
-  try {
-    const booking = await Booking.findById(req.params.bookingId);
-    if (!booking) return bad(res, 'Booking not found', 404);
-    const r = await hitpay.settleBooking(booking, { by: req.user._id });
-    res.json({ success: true, paid: r.paid, alreadyPaid: Boolean(r.alreadyPaid), message: r.message || '', paymentStatus: r.booking.paymentStatus });
   } catch (err) { fail(res, err); }
 });
 
